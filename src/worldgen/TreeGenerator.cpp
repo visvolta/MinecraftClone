@@ -7,6 +7,70 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
+#include <vector>
+
+namespace
+{
+void placeLeaf(
+    WorldGenerationContext& context,
+    int x,
+    int y,
+    int z,
+    BlockType leaves)
+{
+    const BlockType current = context.getBlock(x, y, z);
+    if (current == BlockType::Air || isLeaf(current))
+        context.setBlock(x, y, z, leaves);
+}
+
+void growLeafCircle(
+    WorldGenerationContext& context,
+    int centerX,
+    int y,
+    int centerZ,
+    int radius,
+    BlockType leaves)
+{
+    const int radiusSquared = radius * radius;
+    for (int dx = -radius; dx <= radius; ++dx)
+    {
+        for (int dz = -radius; dz <= radius; ++dz)
+        {
+            if (dx * dx + dz * dz <= radiusSquared)
+                placeLeaf(context, centerX + dx, y, centerZ + dz, leaves);
+        }
+    }
+}
+
+void growStrictLeafLayer(
+    WorldGenerationContext& context,
+    int centerX,
+    int y,
+    int centerZ,
+    int width,
+    BlockType leaves)
+{
+    const int widthSquared = width * width;
+    for (int dx = -width; dx <= width + 1; ++dx)
+    {
+        for (int dz = -width; dz <= width + 1; ++dz)
+        {
+            const int nearX = dx - 1;
+            const int nearZ = dz - 1;
+            if (dx * dx + dz * dz <= widthSquared ||
+                nearX * nearX + nearZ * nearZ <= widthSquared ||
+                dx * dx + nearZ * nearZ <= widthSquared ||
+                nearX * nearX + dz * dz <= widthSquared)
+            {
+                placeLeaf(
+                    context, centerX + dx, y, centerZ + dz, leaves
+                );
+            }
+        }
+    }
+}
+}
 
 bool TreeGenerator::canReplace(BlockType block) noexcept
 {
@@ -61,18 +125,43 @@ bool TreeGenerator::generateForBiome(
     {
         case TreeFeature::None:
             return false;
+        case TreeFeature::OakOnly:
+            return generateOak(context, random, worldX, worldY, worldZ);
+        case TreeFeature::Plains:
+            return random.nextInt(3) == 0
+                ? generateBigOak(context, random, worldX, worldY, worldZ)
+                : generateOak(context, random, worldX, worldY, worldZ);
+        case TreeFeature::Forest:
+            if (random.nextInt(5) == 0)
+                return generateBirch(
+                    context, random, worldX, worldY, worldZ
+                );
+            return random.nextInt(10) == 0
+                ? generateBigOak(context, random, worldX, worldY, worldZ)
+                : generateOak(context, random, worldX, worldY, worldZ);
         case TreeFeature::Birch:
-            return generateBirch(context, random, worldX, worldY, worldZ);
+            return generateBirch(
+                context, random, worldX, worldY, worldZ
+            );
+        case TreeFeature::TallBirch:
+            return generateBirch(
+                context, random, worldX, worldY, worldZ,
+                random.nextBoolean()
+            );
+        case TreeFeature::Spruce:
+            return generateSpruce(
+                context, random, worldX, worldY, worldZ
+            );
         case TreeFeature::Taiga:
             return random.nextInt(3) == 0
                 ? generatePine(context, random, worldX, worldY, worldZ)
                 : generateSpruce(context, random, worldX, worldY, worldZ);
         case TreeFeature::MegaTaiga:
+        case TreeFeature::MegaSpruceTaiga:
             if (random.nextInt(3) == 0)
             {
                 const bool megaSpruce =
-                    biome == VanillaBiomes::MegaSpruceTaiga ||
-                    biome == VanillaBiomes::MegaSpruceTaigaHills ||
+                    feature == TreeFeature::MegaSpruceTaiga ||
                     random.nextInt(13) == 0;
                 return generateMegaPine(
                     context, random, worldX, worldY, worldZ, megaSpruce
@@ -82,6 +171,7 @@ bool TreeGenerator::generateForBiome(
                 ? generatePine(context, random, worldX, worldY, worldZ)
                 : generateSpruce(context, random, worldX, worldY, worldZ);
         case TreeFeature::Jungle:
+        case TreeFeature::JungleEdge:
             if (random.nextInt(10) == 0)
                 return generateBigOak(
                     context, random, worldX, worldY, worldZ
@@ -90,9 +180,7 @@ bool TreeGenerator::generateForBiome(
                 return generateJungleShrub(
                     context, random, worldX, worldY, worldZ
                 );
-            if (biome != VanillaBiomes::JungleEdge &&
-                biome != VanillaBiomes::JungleEdgeMountains &&
-                random.nextInt(3) == 0)
+            if (feature == TreeFeature::Jungle && random.nextInt(3) == 0)
             {
                 return generateMegaJungle(
                     context, random, worldX, worldY, worldZ
@@ -124,22 +212,6 @@ bool TreeGenerator::generateForBiome(
         case TreeFeature::Swamp:
             return generateSwamp(context, random, worldX, worldY, worldZ);
         case TreeFeature::Oak:
-            if (biome == VanillaBiomes::Plains ||
-                biome == VanillaBiomes::SunflowerPlains)
-            {
-                return random.nextInt(3) == 0
-                    ? generateBigOak(context, random, worldX, worldY, worldZ)
-                    : generateOak(context, random, worldX, worldY, worldZ);
-            }
-            if ((biome == VanillaBiomes::Forest ||
-                 biome == VanillaBiomes::ForestHills ||
-                 biome == VanillaBiomes::FlowerForest) &&
-                random.nextInt(5) == 0)
-            {
-                return generateBirch(
-                    context, random, worldX, worldY, worldZ
-                );
-            }
             return random.nextInt(10) == 0
                 ? generateBigOak(context, random, worldX, worldY, worldZ)
                 : generateOak(context, random, worldX, worldY, worldZ);
@@ -191,7 +263,8 @@ bool TreeGenerator::generateOak(
                     std::abs(dx) == radius &&
                     std::abs(dz) == radius;
 
-                if ((!corner || random.nextInt(2) == 0 || layer == 0) &&
+                if ((!corner ||
+                     (random.nextInt(2) != 0 && layer != 0)) &&
                     canReplace(context.getBlock(xx, yy, zz)))
                 {
                     context.setBlock(xx, yy, zz, BlockType::OakLeaves);
@@ -217,75 +290,201 @@ bool TreeGenerator::generateBigOak(
     int y,
     int z) const
 {
-    // WorldGenBigTree defaults: a 5..16-block height limit, a trunk ending at
-    // 61.8% of that height, and four-block leaf clusters around branch nodes.
-    const int heightLimit = 5 + random.nextInt(12);
-    const int trunkHeight = std::min(
-        heightLimit - 1,
-        static_cast<int>(static_cast<float>(heightLimit) * 0.618f)
-    );
-    if (y < 1 || y + heightLimit + 1 > Chunk::HEIGHT ||
-        !hasValidSoil(context, x, y, z))
+    if (y < 1 || !hasValidSoil(context, x, y, z))
         return false;
 
-    for (int yy = y; yy <= y + heightLimit; ++yy)
+    JavaRandom treeRandom(random.nextLong());
+    int heightLimit = 5 + treeRandom.nextInt(12);
+
+    const auto greatestDistance = [](int dx, int dy, int dz)
     {
-        const int radius = yy >= y + heightLimit - 5 ? 3 : 0;
-        for (int xx = x - radius; xx <= x + radius; ++xx)
-            for (int zz = z - radius; zz <= z + radius; ++zz)
-                if (!canOccupy(context, xx, yy, zz))
-                    return false;
+        return std::max({std::abs(dx), std::abs(dy), std::abs(dz)});
+    };
+    const auto checkLine = [&context, &greatestDistance](
+        int fromX, int fromY, int fromZ,
+        int toX, int toY, int toZ)
+    {
+        const int dx = toX - fromX;
+        const int dy = toY - fromY;
+        const int dz = toZ - fromZ;
+        const int distance = greatestDistance(dx, dy, dz);
+        if (distance == 0)
+            return -1;
+
+        const float stepX = static_cast<float>(dx) / distance;
+        const float stepY = static_cast<float>(dy) / distance;
+        const float stepZ = static_cast<float>(dz) / distance;
+        for (int step = 0; step <= distance; ++step)
+        {
+            const int checkX = fromX + static_cast<int>(std::floor(
+                0.5F + static_cast<float>(step) * stepX
+            ));
+            const int checkY = fromY + static_cast<int>(std::floor(
+                0.5F + static_cast<float>(step) * stepY
+            ));
+            const int checkZ = fromZ + static_cast<int>(std::floor(
+                0.5F + static_cast<float>(step) * stepZ
+            ));
+            if (!canReplace(context.getBlock(checkX, checkY, checkZ)))
+                return step;
+        }
+        return -1;
+    };
+
+    const int obstruction = checkLine(
+        x, y, z, x, y + heightLimit - 1, z
+    );
+    if (obstruction != -1)
+    {
+        if (obstruction < 6)
+            return false;
+        heightLimit = obstruction;
+    }
+    if (y + heightLimit + 1 > Chunk::HEIGHT)
+        return false;
+
+    int trunkHeight = static_cast<int>(heightLimit * 0.618);
+    if (trunkHeight >= heightLimit)
+        trunkHeight = heightLimit - 1;
+
+    struct LeafNode
+    {
+        int x;
+        int y;
+        int z;
+        int branchY;
+    };
+    constexpr int leafDistance = 5;
+    int nodesPerLayer = static_cast<int>(
+        1.382 + std::pow(static_cast<double>(heightLimit) / 13.0, 2.0)
+    );
+    nodesPerLayer = std::max(nodesPerLayer, 1);
+    const int trunkTopY = y + trunkHeight;
+    int layer = heightLimit - leafDistance;
+    std::vector<LeafNode> nodes;
+    nodes.push_back({x, y + layer, z, trunkTopY});
+
+    const auto layerSize = [heightLimit](int layerY)
+    {
+        if (static_cast<float>(layerY) < heightLimit * 0.3F)
+            return -1.0F;
+        const float half = static_cast<float>(heightLimit) / 2.0F;
+        const float fromMiddle = half - static_cast<float>(layerY);
+        if (fromMiddle == 0.0F)
+            return half * 0.5F;
+        if (std::abs(fromMiddle) >= half)
+            return 0.0F;
+        return std::sqrt(half * half - fromMiddle * fromMiddle) * 0.5F;
+    };
+
+    for (; layer >= 0; --layer)
+    {
+        const float radius = layerSize(layer);
+        if (radius < 0.0F)
+            continue;
+
+        for (int attempt = 0; attempt < nodesPerLayer; ++attempt)
+        {
+            const double distance = static_cast<double>(radius) *
+                (static_cast<double>(treeRandom.nextFloat()) + 0.328);
+            const double angle = static_cast<double>(treeRandom.nextFloat()) *
+                std::numbers::pi * 2.0;
+            const int nodeX = static_cast<int>(std::floor(
+                static_cast<double>(x) + distance * std::sin(angle) + 0.5
+            ));
+            const int nodeY = y + layer - 1;
+            const int nodeZ = static_cast<int>(std::floor(
+                static_cast<double>(z) + distance * std::cos(angle) + 0.5
+            ));
+            if (checkLine(
+                    nodeX, nodeY, nodeZ,
+                    nodeX, nodeY + leafDistance, nodeZ) != -1)
+                continue;
+
+            const int deltaX = x - nodeX;
+            const int deltaZ = z - nodeZ;
+            const double branchBase = static_cast<double>(nodeY) -
+                std::sqrt(static_cast<double>(
+                    deltaX * deltaX + deltaZ * deltaZ
+                )) * 0.381;
+            const int branchY = branchBase > trunkTopY
+                ? trunkTopY
+                : static_cast<int>(branchBase);
+            if (checkLine(x, branchY, z, nodeX, nodeY, nodeZ) == -1)
+                nodes.push_back({nodeX, nodeY, nodeZ, branchY});
+        }
     }
 
-    context.setBlock(x, y - 1, z, BlockType::Dirt);
-    const int crownBase = y + heightLimit - 4;
-    for (int yy = crownBase; yy <= y + heightLimit; ++yy)
+    for (const LeafNode& node : nodes)
     {
-        const int fromTop = y + heightLimit - yy;
-        const int radius = fromTop == 0 ? 1 : (fromTop == 4 ? 2 : 3);
-        for (int xx = x - radius; xx <= x + radius; ++xx)
+        for (int leafLayer = 0; leafLayer < leafDistance; ++leafLayer)
         {
-            for (int zz = z - radius; zz <= z + radius; ++zz)
+            const float leafRadius =
+                (leafLayer == 0 || leafLayer == leafDistance - 1)
+                ? 2.0F
+                : 3.0F;
+            const int extent = static_cast<int>(leafRadius + 0.618F);
+            for (int dx = -extent; dx <= extent; ++dx)
             {
-                const int dx = std::abs(xx - x);
-                const int dz = std::abs(zz - z);
-                if (dx == radius && dz == radius &&
-                    (fromTop == 0 || random.nextInt(2) == 0))
-                    continue;
-                if (canReplace(context.getBlock(xx, yy, zz)))
-                    context.setBlock(xx, yy, zz, BlockType::OakLeaves);
+                for (int dz = -extent; dz <= extent; ++dz)
+                {
+                    const double sampleX = std::abs(dx) + 0.5;
+                    const double sampleZ = std::abs(dz) + 0.5;
+                    if (sampleX * sampleX + sampleZ * sampleZ <=
+                        static_cast<double>(leafRadius * leafRadius))
+                    {
+                        placeLeaf(
+                            context,
+                            node.x + dx,
+                            node.y + leafLayer,
+                            node.z + dz,
+                            BlockType::OakLeaves
+                        );
+                    }
+                }
             }
         }
     }
 
-    for (int level = 0; level <= trunkHeight; ++level)
-        context.setBlock(x, y + level, z, BlockType::OakLog);
-
-    // Vanilla big oaks connect leaf nodes back to the upper trunk. Four
-    // deterministic side nodes preserve the characteristic spreading crown.
-    constexpr std::array<std::array<int, 2>, 4> offsets{{
-        {{2, 0}}, {{-2, 0}}, {{0, 2}}, {{0, -2}}
-    }};
-    for (const auto& offset : offsets)
+    const auto placeLimb = [&context, &greatestDistance](
+        int fromX, int fromY, int fromZ,
+        int toX, int toY, int toZ)
     {
-        const int branchY = crownBase + random.nextInt(3);
-        const int branchX = x + offset[0];
-        const int branchZ = z + offset[1];
-        context.setBlock(
-            x + offset[0] / 2,
-            branchY - 1,
-            z + offset[1] / 2,
-            BlockType::OakLog
-        );
-        context.setBlock(branchX, branchY, branchZ, BlockType::OakLog);
-        for (int dx = -1; dx <= 1; ++dx)
-            for (int dz = -1; dz <= 1; ++dz)
-                if (canReplace(context.getBlock(
-                        branchX + dx, branchY + 1, branchZ + dz)))
-                    context.setBlock(
-                        branchX + dx, branchY + 1, branchZ + dz,
-                        BlockType::OakLeaves
-                    );
+        const int dx = toX - fromX;
+        const int dy = toY - fromY;
+        const int dz = toZ - fromZ;
+        const int distance = greatestDistance(dx, dy, dz);
+        if (distance == 0)
+        {
+            context.setBlock(fromX, fromY, fromZ, BlockType::OakLog);
+            return;
+        }
+        const float stepX = static_cast<float>(dx) / distance;
+        const float stepY = static_cast<float>(dy) / distance;
+        const float stepZ = static_cast<float>(dz) / distance;
+        for (int step = 0; step <= distance; ++step)
+        {
+            context.setBlock(
+                fromX + static_cast<int>(std::floor(
+                    0.5F + static_cast<float>(step) * stepX
+                )),
+                fromY + static_cast<int>(std::floor(
+                    0.5F + static_cast<float>(step) * stepY
+                )),
+                fromZ + static_cast<int>(std::floor(
+                    0.5F + static_cast<float>(step) * stepZ
+                )),
+                BlockType::OakLog
+            );
+        }
+    };
+
+    context.setBlock(x, y - 1, z, BlockType::Dirt);
+    placeLimb(x, y, z, x, trunkTopY, z);
+    for (const LeafNode& node : nodes)
+    {
+        if (static_cast<double>(node.branchY - y) >= heightLimit * 0.2)
+            placeLimb(x, node.branchY, z, node.x, node.y, node.z);
     }
     return true;
 }
@@ -295,9 +494,12 @@ bool TreeGenerator::generateBirch(
     JavaRandom& random,
     int x,
     int y,
-    int z) const
+    int z,
+    bool extraRandomHeight) const
 {
-    const int height = random.nextInt(3) + 5;
+    int height = random.nextInt(3) + 5;
+    if (extraRandomHeight)
+        height += random.nextInt(7);
     if (y < 1 || y + height + 1 > Chunk::HEIGHT)
         return false;
 
@@ -333,7 +535,8 @@ bool TreeGenerator::generateBirch(
                     std::abs(dx) == radius &&
                     std::abs(dz) == radius;
 
-                if ((!corner || random.nextInt(2) == 0 || layer == 0) &&
+                if ((!corner ||
+                     (random.nextInt(2) != 0 && layer != 0)) &&
                     canReplace(context.getBlock(xx, yy, zz)))
                 {
                     context.setBlock(xx, yy, zz, BlockType::BirchLeaves);
@@ -523,7 +726,8 @@ bool TreeGenerator::generateSwamp(
             {
                 const bool corner = std::abs(xx - x) == radius &&
                     std::abs(zz - z) == radius;
-                if ((!corner || random.nextInt(2) == 0 || layer == 0) &&
+                if ((!corner ||
+                     (random.nextInt(2) != 0 && layer != 0)) &&
                     canReplace(context.getBlock(xx, yy, zz)))
                     context.setBlock(xx, yy, zz, BlockType::OakLeaves);
             }
@@ -545,31 +749,56 @@ bool TreeGenerator::generateJungle(
     int y,
     int z) const
 {
-    const int height = 4 + random.nextInt(7);
-    if (y < 1 || y + height + 2 >= Chunk::HEIGHT ||
-        !hasValidSoil(context, x, y, z))
+    // BiomeJungle first chooses a 4..10 minimum, then WorldGenTrees adds
+    // another 0..2 blocks to the final height.
+    const int minimumHeight = 4 + random.nextInt(7);
+    const int height = minimumHeight + random.nextInt(3);
+    if (y < 1 || y + height + 1 > Chunk::HEIGHT)
         return false;
+
     for (int yy = y; yy <= y + height + 1; ++yy)
     {
-        const int radius = yy >= y + height - 2 ? 2 : 0;
+        int radius = yy == y ? 0 : 1;
+        if (yy >= y + height - 1)
+            radius = 2;
         for (int xx = x - radius; xx <= x + radius; ++xx)
             for (int zz = z - radius; zz <= z + radius; ++zz)
-                if (!canOccupy(context, xx, yy, zz)) return false;
+                if (!canOccupy(context, xx, yy, zz))
+                    return false;
     }
+
+    if (!hasValidSoil(context, x, y, z) ||
+        y >= Chunk::HEIGHT - height - 1)
+        return false;
+
     context.setBlock(x, y - 1, z, BlockType::Dirt);
-    for (int yy = y + height - 3; yy <= y + height; ++yy)
+    for (int yy = y - 3 + height; yy <= y + height; ++yy)
     {
-        const int radius = 1 + (y + height - yy) / 2;
+        const int layer = yy - (y + height);
+        const int radius = 1 - layer / 2;
         for (int xx = x - radius; xx <= x + radius; ++xx)
+        {
+            const int dx = xx - x;
             for (int zz = z - radius; zz <= z + radius; ++zz)
-                if ((std::abs(xx - x) != radius ||
-                     std::abs(zz - z) != radius || random.nextInt(2) == 0) &&
+            {
+                const int dz = zz - z;
+                const bool corner =
+                    std::abs(dx) == radius && std::abs(dz) == radius;
+                if ((!corner ||
+                     (random.nextInt(2) != 0 && layer != 0)) &&
                     canReplace(context.getBlock(xx, yy, zz)))
+                {
                     context.setBlock(xx, yy, zz, BlockType::JungleLeaves);
+                }
+            }
+        }
     }
-    for (int yy = 0; yy < height; ++yy)
-        if (canReplace(context.getBlock(x, y + yy, z)))
-            context.setBlock(x, y + yy, z, BlockType::JungleLog);
+
+    for (int level = 0; level < height; ++level)
+    {
+        if (canReplace(context.getBlock(x, y + level, z)))
+            context.setBlock(x, y + level, z, BlockType::JungleLog);
+    }
     return true;
 }
 
@@ -594,7 +823,7 @@ bool TreeGenerator::generateJungleShrub(
             {
                 const bool corner = std::abs(xx - x) == radius &&
                     std::abs(zz - z) == radius;
-                if ((!corner || random.nextInt(2) == 0) &&
+                if ((!corner || random.nextInt(2) != 0) &&
                     canReplace(context.getBlock(xx, yy, zz)))
                 {
                     context.setBlock(
@@ -616,58 +845,104 @@ bool TreeGenerator::generateMegaJungle(
     int z) const
 {
     const int height = 10 + random.nextInt(3) + random.nextInt(20);
-    if (y < 1 || y + height + 2 >= Chunk::HEIGHT)
+    if (y < 1 || y + height + 1 > Chunk::HEIGHT)
         return false;
-    for (int dx = 0; dx < 2; ++dx)
-        for (int dz = 0; dz < 2; ++dz)
-            if (!hasValidSoil(context, x + dx, y, z + dz))
-                return false;
 
+    // WorldGenHugeTrees validates a radius-two column. The old radius-four
+    // top check rejected border replays asymmetrically and left partial
+    // canopies behind.
     for (int yy = y; yy <= y + height + 1; ++yy)
     {
-        const int radius = yy >= y + height - 4 ? 4 : 1;
-        for (int xx = x - radius; xx <= x + 1 + radius; ++xx)
-            for (int zz = z - radius; zz <= z + 1 + radius; ++zz)
+        const int radius = yy == y ? 1 : 2;
+        for (int xx = x - radius; xx <= x + radius; ++xx)
+            for (int zz = z - radius; zz <= z + radius; ++zz)
                 if (!canOccupy(context, xx, yy, zz))
                     return false;
     }
+
+    if (y < 2 || !hasValidSoil(context, x, y, z))
+        return false;
 
     for (int dx = 0; dx < 2; ++dx)
         for (int dz = 0; dz < 2; ++dz)
             context.setBlock(x + dx, y - 1, z + dz, BlockType::Dirt);
 
-    const int canopyTop = y + height;
-    for (int yy = canopyTop - 4; yy <= canopyTop; ++yy)
+    // WorldGenMegaJungle.createCrown uses three strict, 2x2-centred layers.
+    for (int offsetY = -2; offsetY <= 0; ++offsetY)
     {
-        const int distance = canopyTop - yy;
-        const int radius = 2 + distance / 2;
-        for (int xx = x - radius; xx <= x + 1 + radius; ++xx)
+        growStrictLeafLayer(
+            context,
+            x,
+            y + height + offsetY,
+            z,
+            3 - offsetY,
+            BlockType::JungleLeaves
+        );
+    }
+
+    // Large jungle trees carry descending lateral limbs from the upper half.
+    for (int branchY = y + height - 2 - random.nextInt(4);
+         branchY > y + height / 2;
+         branchY -= 2 + random.nextInt(4))
+    {
+        const float angle = random.nextFloat() *
+            static_cast<float>(std::numbers::pi * 2.0);
+        int branchX = x;
+        int branchZ = z;
+        for (int step = 0; step < 5; ++step)
         {
-            for (int zz = z - radius; zz <= z + 1 + radius; ++zz)
-            {
-                const int edgeX = std::max(x - xx, xx - (x + 1));
-                const int edgeZ = std::max(z - zz, zz - (z + 1));
-                if ((edgeX != radius || edgeZ != radius ||
-                     random.nextInt(2) == 0) &&
-                    canReplace(context.getBlock(xx, yy, zz)))
-                {
-                    context.setBlock(
-                        xx, yy, zz, BlockType::JungleLeaves
-                    );
-                }
-            }
+            branchX = x + static_cast<int>(
+                1.5F + std::cos(angle) * static_cast<float>(step)
+            );
+            branchZ = z + static_cast<int>(
+                1.5F + std::sin(angle) * static_cast<float>(step)
+            );
+            context.setBlock(
+                branchX,
+                branchY - 3 + step / 2,
+                branchZ,
+                BlockType::JungleLog
+            );
+        }
+
+        const int lowerLeaves = 1 + random.nextInt(2);
+        for (int leafY = branchY - lowerLeaves;
+             leafY <= branchY;
+             ++leafY)
+        {
+            growLeafCircle(
+                context,
+                branchX,
+                leafY,
+                branchZ,
+                1 - (leafY - branchY),
+                BlockType::JungleLeaves
+            );
         }
     }
 
     for (int level = 0; level < height; ++level)
-        for (int dx = 0; dx < 2; ++dx)
-            for (int dz = 0; dz < 2; ++dz)
-                if (canReplace(context.getBlock(
-                        x + dx, y + level, z + dz)))
-                    context.setBlock(
-                        x + dx, y + level, z + dz,
-                        BlockType::JungleLog
-                    );
+    {
+        if (canReplace(context.getBlock(x, y + level, z)))
+            context.setBlock(x, y + level, z, BlockType::JungleLog);
+
+        if (level >= height - 1)
+            continue;
+        for (const auto& offset : std::array<std::array<int, 2>, 3>{
+                 std::array<int, 2>{1, 0},
+                 std::array<int, 2>{1, 1},
+                 std::array<int, 2>{0, 1}})
+        {
+            const int logX = x + offset[0];
+            const int logZ = z + offset[1];
+            if (canReplace(context.getBlock(logX, y + level, logZ)))
+            {
+                context.setBlock(
+                    logX, y + level, logZ, BlockType::JungleLog
+                );
+            }
+        }
+    }
     return true;
 }
 
@@ -723,30 +998,33 @@ bool TreeGenerator::generateAcacia(
     for (int dx = -3; dx <= 3; ++dx)
     {
         for (int dz = -3; dz <= 3; ++dz)
-            if ((std::abs(dx) != 3 || std::abs(dz) != 3) &&
-                canReplace(context.getBlock(
-                    trunkX + dx, canopyY, trunkZ + dz)))
-                context.setBlock(
-                    trunkX + dx, canopyY, trunkZ + dz,
+            if (std::abs(dx) != 3 || std::abs(dz) != 3)
+                placeLeaf(
+                    context,
+                    trunkX + dx,
+                    canopyY,
+                    trunkZ + dz,
                     BlockType::AcaciaLeaves
                 );
     }
     for (int dx = -1; dx <= 1; ++dx)
         for (int dz = -1; dz <= 1; ++dz)
-            if (canReplace(context.getBlock(
-                    trunkX + dx, canopyY + 1, trunkZ + dz)))
-                context.setBlock(
-                    trunkX + dx, canopyY + 1, trunkZ + dz,
-                    BlockType::AcaciaLeaves
-                );
-    constexpr int extended[4][2] = {{2,0},{-2,0},{0,2},{0,-2}};
-    for (const auto& offset : extended)
-        if (canReplace(context.getBlock(
-                trunkX + offset[0], canopyY + 1, trunkZ + offset[1])))
-            context.setBlock(
-                trunkX + offset[0], canopyY + 1, trunkZ + offset[1],
+            placeLeaf(
+                context,
+                trunkX + dx,
+                canopyY + 1,
+                trunkZ + dz,
                 BlockType::AcaciaLeaves
             );
+    constexpr int extended[4][2] = {{2,0},{-2,0},{0,2},{0,-2}};
+    for (const auto& offset : extended)
+        placeLeaf(
+            context,
+            trunkX + offset[0],
+            canopyY + 1,
+            trunkZ + offset[1],
+            BlockType::AcaciaLeaves
+        );
 
     int secondDirection = random.nextInt(4);
     if (secondDirection != direction)
@@ -773,21 +1051,23 @@ bool TreeGenerator::generateAcacia(
         {
             for (int dx = -2; dx <= 2; ++dx)
                 for (int dz = -2; dz <= 2; ++dz)
-                    if ((std::abs(dx) != 2 || std::abs(dz) != 2) &&
-                        canReplace(context.getBlock(
-                            branchX + dx, branchY, branchZ + dz)))
-                        context.setBlock(
-                            branchX + dx, branchY, branchZ + dz,
+                    if (std::abs(dx) != 2 || std::abs(dz) != 2)
+                        placeLeaf(
+                            context,
+                            branchX + dx,
+                            branchY,
+                            branchZ + dz,
                             BlockType::AcaciaLeaves
                         );
             for (int dx = -1; dx <= 1; ++dx)
                 for (int dz = -1; dz <= 1; ++dz)
-                    if (canReplace(context.getBlock(
-                            branchX + dx, branchY + 1, branchZ + dz)))
-                        context.setBlock(
-                            branchX + dx, branchY + 1, branchZ + dz,
-                            BlockType::AcaciaLeaves
-                        );
+                    placeLeaf(
+                        context,
+                        branchX + dx,
+                        branchY + 1,
+                        branchZ + dz,
+                        BlockType::AcaciaLeaves
+                    );
         }
     }
     return true;
@@ -801,33 +1081,172 @@ bool TreeGenerator::generateDarkOak(
     int z) const
 {
     const int height = 6 + random.nextInt(3) + random.nextInt(2);
-    if (y < 1 || y + height + 2 >= Chunk::HEIGHT)
+    if (y < 1 || y + height + 1 >= Chunk::HEIGHT)
         return false;
-    for (int dx = 0; dx < 2; ++dx)
-        for (int dz = 0; dz < 2; ++dz)
-            if (!hasValidSoil(context, x + dx, y, z + dz)) return false;
-    for (int yy = y; yy < y + height; ++yy)
-        for (int dx = 0; dx < 2; ++dx)
-            for (int dz = 0; dz < 2; ++dz)
-            {
-                if (!canOccupy(context, x + dx, yy, z + dz)) return false;
-                context.setBlock(
-                    x + dx, yy, z + dz, BlockType::DarkOakLog
-                );
-            }
+
+    for (int level = 0; level <= height + 1; ++level)
+    {
+        int radius = 1;
+        if (level == 0)
+            radius = 0;
+        else if (level >= height - 1)
+            radius = 2;
+
+        for (int dx = -radius; dx <= radius; ++dx)
+            for (int dz = -radius; dz <= radius; ++dz)
+                if (!canOccupy(context, x + dx, y + level, z + dz))
+                    return false;
+    }
+
+    if (!hasValidSoil(context, x, y, z))
+        return false;
+
     for (int dx = 0; dx < 2; ++dx)
         for (int dz = 0; dz < 2; ++dz)
             context.setBlock(x + dx, y - 1, z + dz, BlockType::Dirt);
-    for (int yy = y + height - 2; yy <= y + height + 1; ++yy)
+
+    constexpr std::array<std::array<int, 2>, 4> directions{{
+        {{1, 0}}, {{-1, 0}}, {{0, 1}}, {{0, -1}}
+    }};
+    const auto& direction = directions[
+        static_cast<std::size_t>(random.nextInt(4))
+    ];
+    const int bendStart = height - random.nextInt(4);
+    int bendLength = 2 - random.nextInt(3);
+    int trunkX = x;
+    int trunkZ = z;
+    const int canopyY = y + height - 1;
+
+    for (int level = 0; level < height; ++level)
     {
-        const int radius = yy == y + height + 1 ? 1 : 3;
-        for (int xx = x - radius; xx <= x + 1 + radius; ++xx)
-            for (int zz = z - radius; zz <= z + 1 + radius; ++zz)
-                if ((radius != 3 || std::abs(xx - x) < 3 ||
-                     std::abs(zz - z) < 3) &&
-                    canReplace(context.getBlock(xx, yy, zz)))
-                    context.setBlock(xx, yy, zz, BlockType::DarkOakLeaves);
+        if (level >= bendStart && bendLength > 0)
+        {
+            trunkX += direction[0];
+            trunkZ += direction[1];
+            --bendLength;
+        }
+
+        const int trunkY = y + level;
+        const BlockType current = context.getBlock(trunkX, trunkY, trunkZ);
+        if (current == BlockType::Air || isLeaf(current))
+        {
+            for (int dx = 0; dx < 2; ++dx)
+                for (int dz = 0; dz < 2; ++dz)
+                    if (canReplace(context.getBlock(
+                            trunkX + dx, trunkY, trunkZ + dz)))
+                    {
+                        context.setBlock(
+                            trunkX + dx,
+                            trunkY,
+                            trunkZ + dz,
+                            BlockType::DarkOakLog
+                        );
+                    }
+        }
     }
+
+    const auto placeDarkLeaf = [&context](int leafX, int leafY, int leafZ)
+    {
+        if (context.getBlock(leafX, leafY, leafZ) == BlockType::Air)
+        {
+            context.setBlock(
+                leafX, leafY, leafZ, BlockType::DarkOakLeaves
+            );
+        }
+    };
+
+    for (int dx = -2; dx <= 0; ++dx)
+    {
+        for (int dz = -2; dz <= 0; ++dz)
+        {
+            placeDarkLeaf(trunkX + dx, canopyY - 1, trunkZ + dz);
+            placeDarkLeaf(1 + trunkX - dx, canopyY - 1, trunkZ + dz);
+            placeDarkLeaf(trunkX + dx, canopyY - 1, 1 + trunkZ - dz);
+            placeDarkLeaf(
+                1 + trunkX - dx, canopyY - 1, 1 + trunkZ - dz
+            );
+
+            if ((dx > -2 || dz > -1) && (dx != -1 || dz != -2))
+            {
+                placeDarkLeaf(trunkX + dx, canopyY + 1, trunkZ + dz);
+                placeDarkLeaf(1 + trunkX - dx, canopyY + 1, trunkZ + dz);
+                placeDarkLeaf(trunkX + dx, canopyY + 1, 1 + trunkZ - dz);
+                placeDarkLeaf(
+                    1 + trunkX - dx, canopyY + 1, 1 + trunkZ - dz
+                );
+            }
+        }
+    }
+
+    if (random.nextBoolean())
+    {
+        placeDarkLeaf(trunkX, canopyY + 2, trunkZ);
+        placeDarkLeaf(trunkX + 1, canopyY + 2, trunkZ);
+        placeDarkLeaf(trunkX + 1, canopyY + 2, trunkZ + 1);
+        placeDarkLeaf(trunkX, canopyY + 2, trunkZ + 1);
+    }
+
+    for (int dx = -3; dx <= 4; ++dx)
+    {
+        for (int dz = -3; dz <= 4; ++dz)
+        {
+            const bool corner =
+                (dx == -3 || dx == 4) && (dz == -3 || dz == 4);
+            if (!corner && (std::abs(dx) < 3 || std::abs(dz) < 3))
+                placeDarkLeaf(trunkX + dx, canopyY, trunkZ + dz);
+        }
+    }
+
+    for (int branchX = -1; branchX <= 2; ++branchX)
+    {
+        for (int branchZ = -1; branchZ <= 2; ++branchZ)
+        {
+            const bool outsideTrunk = branchX < 0 || branchX > 1 ||
+                branchZ < 0 || branchZ > 1;
+            if (!outsideTrunk || random.nextInt(3) > 0)
+                continue;
+
+            const int length = random.nextInt(3) + 2;
+            for (int segment = 0; segment < length; ++segment)
+            {
+                const int logY = canopyY - segment - 1;
+                if (canReplace(context.getBlock(
+                        x + branchX, logY, z + branchZ)))
+                {
+                    context.setBlock(
+                        x + branchX,
+                        logY,
+                        z + branchZ,
+                        BlockType::DarkOakLog
+                    );
+                }
+            }
+
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    placeDarkLeaf(
+                        trunkX + branchX + dx,
+                        canopyY,
+                        trunkZ + branchZ + dz
+                    );
+
+            for (int dx = -2; dx <= 2; ++dx)
+            {
+                for (int dz = -2; dz <= 2; ++dz)
+                {
+                    if (std::abs(dx) != 2 || std::abs(dz) != 2)
+                    {
+                        placeDarkLeaf(
+                            trunkX + branchX + dx,
+                            canopyY - 1,
+                            trunkZ + branchZ + dz
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     return true;
 }
 
@@ -840,11 +1259,24 @@ bool TreeGenerator::generateMegaPine(
     bool tallCrown) const
 {
     const int height = 13 + random.nextInt(3) + random.nextInt(15);
-    if (y < 1 || y + height + 2 >= Chunk::HEIGHT)
+    if (y < 1 || y + height + 1 > Chunk::HEIGHT)
         return false;
+
+    for (int level = 0; level <= height + 1; ++level)
+    {
+        const int radius = level == 0 ? 1 : 2;
+        for (int dx = -radius; dx <= radius; ++dx)
+            for (int dz = -radius; dz <= radius; ++dz)
+                if (!canOccupy(context, x + dx, y + level, z + dz))
+                    return false;
+    }
+    if (y < 2 || !hasValidSoil(context, x, y, z))
+        return false;
+
     for (int dx = 0; dx < 2; ++dx)
         for (int dz = 0; dz < 2; ++dz)
-            if (!hasValidSoil(context, x + dx, y, z + dz)) return false;
+            context.setBlock(x + dx, y - 1, z + dz, BlockType::Dirt);
+
     const int crownHeight = random.nextInt(5) + (tallCrown ? 13 : 3);
     int previousRadius = -1;
     for (int yy = y + height - crownHeight; yy <= y + height; ++yy)
@@ -859,21 +1291,36 @@ bool TreeGenerator::generateMegaPine(
         {
             ++radius;
         }
-        for (int xx = x - radius; xx <= x + radius; ++xx)
-            for (int zz = z - radius; zz <= z + radius; ++zz)
-                if ((std::abs(xx - x) != radius ||
-                     std::abs(zz - z) != radius || radius <= 0) &&
-                    canReplace(context.getBlock(xx, yy, zz)))
-                    context.setBlock(xx, yy, zz, BlockType::SpruceLeaves);
+        growStrictLeafLayer(
+            context, x, yy, z, radius, BlockType::SpruceLeaves
+        );
         previousRadius = radius;
     }
-    for (int yy = y; yy < y + height; ++yy)
-        for (int dx = 0; dx < 2; ++dx)
-            for (int dz = 0; dz < 2; ++dz)
-                if (canReplace(context.getBlock(x + dx, yy, z + dz)))
-                    context.setBlock(
-                        x + dx, yy, z + dz, BlockType::SpruceLog
-                    );
+
+    for (int level = 0; level < height; ++level)
+    {
+        if (canReplace(context.getBlock(x, y + level, z)))
+            context.setBlock(x, y + level, z, BlockType::SpruceLog);
+
+        if (level >= height - 1)
+            continue;
+        for (const auto& offset : std::array<std::array<int, 2>, 3>{
+                 std::array<int, 2>{1, 0},
+                 std::array<int, 2>{1, 1},
+                 std::array<int, 2>{0, 1}})
+        {
+            if (canReplace(context.getBlock(
+                    x + offset[0], y + level, z + offset[1])))
+            {
+                context.setBlock(
+                    x + offset[0],
+                    y + level,
+                    z + offset[1],
+                    BlockType::SpruceLog
+                );
+            }
+        }
+    }
 
     // WorldGenMegaPineTree.generateSaplings spreads podzol in four circles
     // around the 2x2 trunk. Apply the deterministic core patches here; the
@@ -881,7 +1328,9 @@ bool TreeGenerator::generateMegaPine(
     constexpr int patchCentres[4][2] = {
         {-1, -1}, {2, -1}, {-1, 2}, {2, 2}
     };
-    for (const auto& centre : patchCentres)
+    const auto placePodzolPatch = [&context, x, y, z](
+        int centerX,
+        int centerZ)
     {
         for (int dx = -2; dx <= 2; ++dx)
         {
@@ -889,8 +1338,8 @@ bool TreeGenerator::generateMegaPine(
             {
                 if (std::abs(dx) == 2 && std::abs(dz) == 2)
                     continue;
-                const int patchX = x + centre[0] + dx;
-                const int patchZ = z + centre[1] + dz;
+                const int patchX = x + centerX + dx;
+                const int patchZ = z + centerZ + dz;
                 for (int offsetY = 2; offsetY >= -3; --offsetY)
                 {
                     const int patchY = y - 1 + offsetY;
@@ -908,6 +1357,21 @@ bool TreeGenerator::generateMegaPine(
                         break;
                 }
             }
+        }
+    };
+
+    for (const auto& centre : patchCentres)
+        placePodzolPatch(centre[0], centre[1]);
+
+    for (int attempt = 0; attempt < 5; ++attempt)
+    {
+        const int point = random.nextInt(64);
+        const int offsetX = point % 8;
+        const int offsetZ = point / 8;
+        if (offsetX == 0 || offsetX == 7 ||
+            offsetZ == 0 || offsetZ == 7)
+        {
+            placePodzolPatch(-3 + offsetX, -3 + offsetZ);
         }
     }
     return true;

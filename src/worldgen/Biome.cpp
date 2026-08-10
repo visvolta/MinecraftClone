@@ -39,6 +39,7 @@ BiomeRegistry makeVanillaRegistry()
     auto value = biome(0, "ocean", "Ocean", -1.0f, 0.1f, 0.5f, 0.5f);
     value.treeFeature = TreeFeature::None; add(std::move(value));
     value = biome(1, "plains", "Plains", 0.125f, 0.05f, 0.8f, 0.4f);
+    value.treeFeature = TreeFeature::Plains;
     value.treesPerChunk = 0; value.extraTreeChance = 0.05f;
     value.grassPerChunk = 10; value.flowersPerChunk = 4; add(std::move(value));
     value = biome(2, "desert", "Desert", 0.125f, 0.05f, 2.0f, 0.0f);
@@ -48,7 +49,8 @@ BiomeRegistry makeVanillaRegistry()
     value = biome(3, "extreme_hills", "Extreme Hills", 1.0f, 0.5f, 0.2f, 0.3f);
     value.treeFeature = TreeFeature::Hills; value.treesPerChunk = 0; add(std::move(value));
     value = biome(4, "forest", "Forest", 0.1f, 0.2f, 0.7f, 0.8f);
-    value.treesPerChunk = 10; value.grassPerChunk = 2; value.flowersPerChunk = 2; add(std::move(value));
+    value.treeFeature = TreeFeature::Forest; value.treesPerChunk = 10;
+    value.grassPerChunk = 2; value.flowersPerChunk = 2; add(std::move(value));
     value = biome(5, "taiga", "Taiga", 0.2f, 0.2f, 0.25f, 0.8f);
     value.treeFeature = TreeFeature::Taiga; value.treesPerChunk = 10; add(std::move(value));
     value = biome(6, "swampland", "Swampland", -0.2f, 0.1f, 0.8f, 0.9f);
@@ -66,10 +68,10 @@ BiomeRegistry makeVanillaRegistry()
     value = biome(11, "frozen_river", "Frozen River", -0.5f, 0.0f, 0.0f, 0.5f);
     value.snowy = true; value.treeFeature = TreeFeature::None; add(std::move(value));
     value = biome(12, "ice_flats", "Ice Plains", 0.125f, 0.05f, 0.0f, 0.5f);
-    value.snowy = true; value.treeFeature = TreeFeature::Taiga;
+    value.snowy = true; value.treeFeature = TreeFeature::Spruce;
     value.treesPerChunk = 0; add(std::move(value));
     value = biome(13, "ice_mountains", "Ice Mountains", 0.45f, 0.3f, 0.0f, 0.5f);
-    value.snowy = true; value.treeFeature = TreeFeature::Taiga;
+    value.snowy = true; value.treeFeature = TreeFeature::Spruce;
     add(std::move(value));
     value = biome(14, "mushroom_island", "Mushroom Island", 0.2f, 0.3f, 0.9f, 1.0f);
     value.treeFeature = TreeFeature::None; value.treesPerChunk = -100;
@@ -85,7 +87,8 @@ BiomeRegistry makeVanillaRegistry()
     value.treeFeature = TreeFeature::None; value.treesPerChunk = -999;
     value.grassPerChunk = 0; value.flowersPerChunk = 0; add(std::move(value));
     value = biome(18, "forest_hills", "Forest Hills", 0.45f, 0.3f, 0.7f, 0.8f);
-    value.treesPerChunk = 10; value.grassPerChunk = 2; add(std::move(value));
+    value.treeFeature = TreeFeature::Forest; value.treesPerChunk = 10;
+    value.grassPerChunk = 2; add(std::move(value));
     value = biome(19, "taiga_hills", "Taiga Hills", 0.45f, 0.3f, 0.25f, 0.8f);
     value.treeFeature = TreeFeature::Taiga; value.treesPerChunk = 10; add(std::move(value));
     value = biome(20, "smaller_extreme_hills", "Extreme Hills Edge", 0.8f, 0.3f, 0.2f, 0.3f);
@@ -97,7 +100,7 @@ BiomeRegistry makeVanillaRegistry()
     value.treeFeature = TreeFeature::Jungle; value.treesPerChunk = 50;
     value.grassPerChunk = 25; value.flowersPerChunk = 4; add(std::move(value));
     value = biome(23, "jungle_edge", "Jungle Edge", 0.1f, 0.2f, 0.95f, 0.8f);
-    value.treeFeature = TreeFeature::Jungle; value.treesPerChunk = 2;
+    value.treeFeature = TreeFeature::JungleEdge; value.treesPerChunk = 2;
     value.grassPerChunk = 25; value.flowersPerChunk = 4; add(std::move(value));
     value = biome(24, "deep_ocean", "Deep Ocean", -1.8f, 0.1f, 0.5f, 0.5f);
     value.treeFeature = TreeFeature::None; add(std::move(value));
@@ -143,7 +146,7 @@ BiomeRegistry makeVanillaRegistry()
     value.grassPerChunk = 0; value.flowersPerChunk = 0; add(std::move(value));
     value = biome(38, "mesa_rock", "Mesa Plateau F", 1.5f, 0.025f, 2.0f, 0.0f);
     value.rain = false; value.topBlock = BlockType::Sand; value.fillerBlock = BlockType::Sand;
-    value.treeFeature = TreeFeature::Oak; value.treesPerChunk = 5;
+    value.treeFeature = TreeFeature::OakOnly; value.treesPerChunk = 5;
     value.grassPerChunk = 0; value.flowersPerChunk = 0; add(std::move(value));
     value = biome(39, "mesa_clear_rock", "Mesa Plateau", 1.5f, 0.025f, 2.0f, 0.0f);
     value.rain = false; value.topBlock = BlockType::Sand; value.fillerBlock = BlockType::Sand;
@@ -236,6 +239,7 @@ BiomeRegistry makeVanillaRegistry()
             result.findMutable(VanillaBiomes::MegaSpruceTaiga))
     {
         megaSpruce->temperature = 0.25f;
+        megaSpruce->treeFeature = TreeFeature::MegaSpruceTaiga;
     }
     if (BiomeDefinition* megaSpruceHills =
             result.findMutable(VanillaBiomes::MegaSpruceTaigaHills))
@@ -243,6 +247,14 @@ BiomeRegistry makeVanillaRegistry()
         megaSpruceHills->baseHeight = 0.2f;
         megaSpruceHills->heightVariation = 0.2f;
         megaSpruceHills->temperature = 0.25f;
+        megaSpruceHills->treeFeature = TreeFeature::MegaSpruceTaiga;
+    }
+    for (const BiomeId birchMutation : {
+             VanillaBiomes::BirchForestMountains,
+             VanillaBiomes::BirchForestHillsMountains})
+    {
+        if (BiomeDefinition* birch = result.findMutable(birchMutation))
+            birch->treeFeature = TreeFeature::TallBirch;
     }
     for (const BiomeId savannaMutation : {
              VanillaBiomes::SavannaMountains,

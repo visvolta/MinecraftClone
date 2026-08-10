@@ -4,6 +4,25 @@
 
 #include <utility>
 #include <algorithm>
+#include <cstdint>
+
+std::size_t WorldGenerationContext::FeaturePositionHash::operator()(
+    const FeaturePosition& position) const noexcept
+{
+    // A stable integer mix handles negative world coordinates without
+    // relying on implementation-defined shifts.
+    std::uint64_t hash = static_cast<std::uint32_t>(position.x);
+    hash ^= static_cast<std::uint64_t>(
+        static_cast<std::uint32_t>(position.z)
+    ) << 32U;
+    hash ^= static_cast<std::uint64_t>(
+        static_cast<std::uint32_t>(position.y)
+    ) * 0x9E3779B97F4A7C15ULL;
+    hash ^= hash >> 30U;
+    hash *= 0xBF58476D1CE4E5B9ULL;
+    hash ^= hash >> 27U;
+    return static_cast<std::size_t>(hash ^ (hash >> 31U));
+}
 
 WorldGenerationContext::WorldGenerationContext(
     Chunk& targetChunk,
@@ -25,6 +44,22 @@ BlockType WorldGenerationContext::getBlock(
     if (worldY < 0 || worldY >= Chunk::HEIGHT)
     {
         return BlockType::Air;
+    }
+
+    if (isolatedFeatureActive_)
+    {
+        const auto staged = stagedFeatureBlocks_.find(
+            FeaturePosition{worldX, worldY, worldZ}
+        );
+        if (staged != stagedFeatureBlocks_.end())
+            return staged->second;
+
+        // Population is replayed separately for every target chunk. Reading
+        // the terrain snapshot here gives every replay exactly the same
+        // validation input, including when a tree crosses a chunk boundary.
+        return fallbackSampler_
+            ? fallbackSampler_(worldX, worldY, worldZ)
+            : BlockType::Air;
     }
 
     if (isInsideTarget(worldX, worldY, worldZ))
@@ -60,6 +95,16 @@ bool WorldGenerationContext::setBlock(
     int worldZ,
     BlockType block)
 {
+    if (isolatedFeatureActive_)
+    {
+        if (worldY < 0 || worldY >= Chunk::HEIGHT)
+            return false;
+        stagedFeatureBlocks_.insert_or_assign(
+            FeaturePosition{worldX, worldY, worldZ}, block
+        );
+        return true;
+    }
+
     if (!isInsideTarget(worldX, worldY, worldZ))
     {
         return false;
@@ -71,6 +116,33 @@ bool WorldGenerationContext::setBlock(
         worldZ - targetChunk_.getWorldOriginZ(),
         block
     );
+}
+
+void WorldGenerationContext::beginIsolatedFeature()
+{
+    stagedFeatureBlocks_.clear();
+    isolatedFeatureActive_ = true;
+}
+
+void WorldGenerationContext::finishIsolatedFeature(bool commit)
+{
+    if (commit)
+    {
+        for (const auto& [position, block] : stagedFeatureBlocks_)
+        {
+            if (!isInsideTarget(position.x, position.y, position.z))
+                continue;
+            targetChunk_.setBlock(
+                position.x - targetChunk_.getWorldOriginX(),
+                position.y,
+                position.z - targetChunk_.getWorldOriginZ(),
+                block
+            );
+        }
+    }
+
+    stagedFeatureBlocks_.clear();
+    isolatedFeatureActive_ = false;
 }
 
 

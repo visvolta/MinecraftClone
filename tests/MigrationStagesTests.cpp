@@ -36,10 +36,22 @@ int main()
 
     const BiomeRegistry& vanilla = BiomeRegistry::vanilla();
     assert(vanilla.find(VanillaBiomes::Jungle)->treeFeature == TreeFeature::Jungle);
+    assert(vanilla.find(VanillaBiomes::Jungle)->treesPerChunk == 50);
+    assert(vanilla.find(VanillaBiomes::JungleEdge)->treeFeature == TreeFeature::JungleEdge);
+    assert(vanilla.find(VanillaBiomes::JungleEdge)->treesPerChunk == 2);
     assert(vanilla.find(VanillaBiomes::Savanna)->treeFeature == TreeFeature::Savanna);
+    assert(vanilla.find(VanillaBiomes::Savanna)->treesPerChunk == 1);
     assert(vanilla.find(VanillaBiomes::Swampland)->treeFeature == TreeFeature::Swamp);
+    assert(vanilla.find(VanillaBiomes::Swampland)->treesPerChunk == 2);
     assert(vanilla.find(VanillaBiomes::ExtremeHills)->treeFeature == TreeFeature::Hills);
     assert(vanilla.find(VanillaBiomes::RoofedForest)->roofedForestDecoration);
+    assert(vanilla.find(VanillaBiomes::Forest)->treeFeature == TreeFeature::Forest);
+    assert(vanilla.find(VanillaBiomes::Forest)->treesPerChunk == 10);
+    assert(vanilla.find(VanillaBiomes::FlowerForest)->treesPerChunk == 6);
+    assert(vanilla.find(VanillaBiomes::IcePlains)->treeFeature == TreeFeature::Spruce);
+    assert(vanilla.find(VanillaBiomes::MesaPlateauF)->treeFeature == TreeFeature::OakOnly);
+    assert(vanilla.find(VanillaBiomes::MegaSpruceTaiga)->treeFeature == TreeFeature::MegaSpruceTaiga);
+    assert(vanilla.find(VanillaBiomes::BirchForestMountains)->treeFeature == TreeFeature::TallBirch);
     assert(vanilla.find(VanillaBiomes::Desert)->generationWeights[0] == 3);
     assert(vanilla.find(VanillaBiomes::Savanna)->generationWeights[0] == 2);
     assert(vanilla.find(VanillaBiomes::Plains)->generationWeights[0] == 1);

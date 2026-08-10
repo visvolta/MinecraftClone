@@ -40,7 +40,8 @@ private:
         JavaRandom& random,
         int x,
         int y,
-        int z
+        int z,
+        bool extraRandomHeight = false
     ) const;
 
     bool generateSpruce(

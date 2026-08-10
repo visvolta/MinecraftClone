@@ -65,6 +65,20 @@ void PopulationGenerator::populate(
     const DecorationGenerator decorations;
     const DungeonGenerator dungeons;
     const LakeGenerator lavaLake(BlockType::Lava);
+    const auto generateTree = [&context, &trees](
+        JavaRandom& random,
+        BiomeId biome,
+        int x,
+        int y,
+        int z)
+    {
+        context.beginIsolatedFeature();
+        const bool generated = trees.generateForBiome(
+            context, random, biome, x, y, z
+        );
+        context.finishIsolatedFeature(generated);
+        return generated;
+    };
 
     // Biome decoration starts features at +8 inside each source chunk, so a
     // target chunk can receive features from itself and its negative-X/Z
@@ -154,10 +168,14 @@ void PopulationGenerator::populate(
                             random.nextInt(3);
                         const int treeZ = originZ + gridZ * 4 + 9 +
                             random.nextInt(3);
-                        trees.generateForBiome(
-                            context,
-                            random,
-                            climate.biome,
+                        // Roofed forests reserve one in twenty grid cells for
+                        // a huge mushroom in 1.12.2. Huge mushrooms are not a
+                        // registered feature yet, so leave that cell empty
+                        // instead of inflating the dark-oak density.
+                        if (random.nextInt(20) == 0)
+                            continue;
+                        generateTree(
+                            random, climate.biome,
                             treeX,
                             context.getHeightValue(treeX, treeZ),
                             treeZ
@@ -181,13 +199,8 @@ void PopulationGenerator::populate(
                     const int treeZ = originZ + random.nextInt(16) + 8;
                     const int treeY = context.getHeightValue(treeX, treeZ);
 
-                    trees.generateForBiome(
-                        context,
-                        random,
-                        climate.biome,
-                        treeX,
-                        treeY,
-                        treeZ
+                    generateTree(
+                        random, climate.biome, treeX, treeY, treeZ
                     );
                 }
             }

@@ -1,5 +1,7 @@
 #include "Mesh.h"
 
+#include <glad/gl.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <utility>

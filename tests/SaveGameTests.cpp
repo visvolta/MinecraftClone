@@ -217,4 +217,27 @@ int main()
     std::filesystem::remove(path.string() + ".bak", ignored);
     std::filesystem::remove(legacyPath, ignored);
     std::filesystem::remove(legacyPath.string() + ".bak", ignored);
+
+    const std::filesystem::path wipeSandbox =
+        std::filesystem::temp_directory_path() /
+        "minecraftclone-save-wipe-test";
+    std::filesystem::remove_all(wipeSandbox, ignored);
+    std::filesystem::create_directories(
+        wipeSandbox / "saves" / "WorldOne"
+    );
+    std::filesystem::create_directories(
+        wipeSandbox / "saves" / "WorldTwo"
+    );
+    std::ofstream(wipeSandbox / "saves" / "WorldOne" / "world.dat")
+        << "save one";
+    std::ofstream(wipeSandbox / "saves" / "WorldTwo" / "world.dat")
+        << "save two";
+
+    const std::filesystem::path originalDirectory =
+        std::filesystem::current_path();
+    std::filesystem::current_path(wipeSandbox);
+    assert(SaveGame::wipeAll(message));
+    assert(!std::filesystem::exists("saves"));
+    std::filesystem::current_path(originalDirectory);
+    std::filesystem::remove_all(wipeSandbox, ignored);
 }

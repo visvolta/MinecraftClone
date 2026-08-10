@@ -188,6 +188,11 @@ std::size_t ItemEntityManager::size() const noexcept
     return entities_.size();
 }
 
+void ItemEntityManager::clear() noexcept
+{
+    entities_.clear();
+}
+
 float ItemEntityManager::randomFloat(
     float minimum,
     float maximum)

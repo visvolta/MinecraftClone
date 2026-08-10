@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include <glm/vec3.hpp>
 
 struct GLFWwindow;
@@ -19,7 +22,7 @@ public:
     DebugOverlay& operator=(const DebugOverlay&) = delete;
 
     void beginFrame();
-    void draw(
+    [[nodiscard]] std::optional<int> draw(
         World& world,
         Player& player,
         Camera& camera,
@@ -28,8 +31,12 @@ public:
         const glm::vec3& playerPosition,
         bool& fastLeaves
     );
+    void setWorldResetStatus(std::string status);
     void render() const;
 
 private:
     bool initialized = false;
+    bool newWorldSeedInitialized_ = false;
+    int newWorldSeed_ = 1337;
+    std::string worldResetStatus_;
 };

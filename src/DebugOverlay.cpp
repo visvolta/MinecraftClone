@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -73,7 +74,7 @@ void DebugOverlay::beginFrame()
     ImGui::NewFrame();
 }
 
-void DebugOverlay::draw(
+std::optional<int> DebugOverlay::draw(
     World& world,
     Player& player,
     Camera& camera,
@@ -82,6 +83,7 @@ void DebugOverlay::draw(
     const glm::vec3& playerPosition,
     bool& fastLeaves)
 {
+    std::optional<int> requestedSeed;
     const ImGuiIO& io = ImGui::GetIO();
 
     constexpr ImGuiWindowFlags flags =
@@ -227,7 +229,47 @@ void DebugOverlay::draw(
     if (player.isNoClip())
         ImGui::TextDisabled("Fly: WASD, Space, Shift");
 
+    ImGui::SeparatorText("World reset");
+    if (!newWorldSeedInitialized_)
+    {
+        newWorldSeed_ = world.getSeed();
+        newWorldSeedInitialized_ = true;
+    }
+    ImGui::SetNextItemWidth(150.0f);
+    ImGui::InputInt("New world seed", &newWorldSeed_);
+    if (!worldResetStatus_.empty())
+        ImGui::TextWrapped("%s", worldResetStatus_.c_str());
+    if (ImGui::Button("Wipe all saves and create new world"))
+        ImGui::OpenPopup("Confirm save wipe");
+
+    if (ImGui::BeginPopupModal(
+            "Confirm save wipe",
+            nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted(
+            "This permanently deletes every world in the saves folder."
+        );
+        ImGui::Text("The replacement world will use seed %d.", newWorldSeed_);
+        ImGui::Separator();
+        if (ImGui::Button("Wipe saves", ImVec2(120.0f, 0.0f)))
+        {
+            requestedSeed = newWorldSeed_;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
     ImGui::End();
+    return requestedSeed;
+}
+
+void DebugOverlay::setWorldResetStatus(std::string status)
+{
+    worldResetStatus_ = std::move(status);
 }
 
 void DebugOverlay::render() const

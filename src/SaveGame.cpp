@@ -631,3 +631,28 @@ bool SaveGame::save(
         return false;
     }
 }
+
+bool SaveGame::wipeAll(std::string& message)
+{
+    const std::filesystem::path saveRoot =
+        defaultPath().parent_path().parent_path();
+    if (saveRoot.empty() || saveRoot == "." ||
+        saveRoot == saveRoot.root_path())
+    {
+        message = "Refusing to wipe an unsafe save path";
+        return false;
+    }
+
+    std::error_code error;
+    const std::uintmax_t removed =
+        std::filesystem::remove_all(saveRoot, error);
+    if (error)
+    {
+        message = "Could not wipe saves: " + error.message();
+        return false;
+    }
+
+    message = "Deleted " + std::to_string(removed) +
+        " save files and directories";
+    return true;
+}

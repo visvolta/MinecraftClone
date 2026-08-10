@@ -58,6 +58,7 @@ public:
     );
 
     [[nodiscard]] std::size_t size() const noexcept;
+    void clear() noexcept;
 
 private:
     std::vector<ItemEntity> entities_;

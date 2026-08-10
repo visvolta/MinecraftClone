@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 
 #include <glad/gl.h>
@@ -334,13 +336,13 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         constexpr int gameplayRenderDistance = 10;
 
         std::cout << "Loading spawn area...\n";
-        World world(
+        auto world = std::make_unique<World>(
             startupRenderDistance,
             loadedSave ? loadedSave->seed : 1337
         );
         if (loadedSave)
         {
-            world.restorePersistentState(
+            world->restorePersistentState(
                 std::move(loadedSave->modifiedChunks),
                 std::move(loadedSave->blockEntities),
                 loadedSave->fluidTicks
@@ -365,17 +367,17 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         const glm::vec3 initialLoadPosition = loadedSave
             ? loadedSave->player.position
             : spawnColumn;
-        world.update(initialLoadPosition);
-        world.finishInitialLoad();
+        world->update(initialLoadPosition);
+        world->finishInitialLoad();
 
         // Start rendering after only the 3x3 spawn area is ready. The full
         // seven-chunk distance then streams in asynchronously during gameplay.
-        world.setRenderDistance(gameplayRenderDistance);
+        world->setRenderDistance(gameplayRenderDistance);
 
         const float spawnFeetY =
-            static_cast<float>(world.getHighestSolidBlockY(spawnBlockX, spawnBlockZ) + 1);
+            static_cast<float>(world->getHighestSolidBlockY(spawnBlockX, spawnBlockZ) + 1);
 
-        const glm::vec3 spawnFeetPosition(
+        glm::vec3 spawnFeetPosition(
             spawnColumn.x,
             spawnFeetY,
             spawnColumn.z
@@ -387,9 +389,9 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             player.restorePersistentState(loadedSave->player);
         camera.setPosition(player.getEyePosition());
 
-        std::cout << "Chunks: " << world.getLoadedChunkCount()
-                  << ", visible faces: " << world.getVisibleFaceCount()
-                  << ", vertices: " << world.getVertexCount() << '\n';
+        std::cout << "Chunks: " << world->getLoadedChunkCount()
+                  << ", visible faces: " << world->getVisibleFaceCount()
+                  << ", vertices: " << world->getVertexCount() << '\n';
 
         const glm::mat4 model(1.0f);
         constexpr float blockReach = 5.0f;
@@ -433,18 +435,18 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     static_cast<std::uint64_t>(processedGameTicks) +
                     static_cast<std::uint64_t>(tickIndex) + 1U;
 
-                world.tick();
+                world->tick();
                 itemEntities.tick(
-                    world,
+                    *world,
                     player,
                     inventory
                 );
-                atmosphere.tick(world, player.getEyePosition());
+                atmosphere.tick(*world, player.getEyePosition());
 
                 if (gameTick % 600 == 0)
                 {
                     const GameSaveData data = captureSaveData(
-                        world, player, inventory, atmosphere
+                        *world, player, inventory, atmosphere
                     );
                     if (!SaveGame::save(
                             savePath,
@@ -547,9 +549,9 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 }
             }
             player.survival().setArmor(armorPoints, armorToughness);
-            player.update(window, deltaTime, world, camera);
-            world.setFastLeavesEnabled(fastLeaves);
-            world.update(player.getPosition());
+            player.update(window, deltaTime, *world, camera);
+            world->setFastLeavesEnabled(fastLeaves);
+            world->update(player.getPosition());
 
             if (!player.isAlive() && !deathScreenActive)
             {
@@ -610,7 +612,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             dropWasPressed = dropPressed;
 
             RaycastHit targetedBlock = Raycast::cast(
-                world,
+                *world,
                 camera.getPosition(),
                 camera.getForward(),
                 blockReach
@@ -635,7 +637,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             bool targetedInteraction = false;
             if (targetedBlock.hit)
             {
-                const BlockType target = world.getBlock(
+                const BlockType target = world->getBlock(
                     targetedBlock.blockPosition.x,
                     targetedBlock.blockPosition.y,
                     targetedBlock.blockPosition.z
@@ -665,7 +667,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     mc::gameplay::StatusEffectType::MiningFatigue
                 ),
                 false,
-                world,
+                *world,
                 itemEntities
             );
 
@@ -690,7 +692,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             if (!consumedFood && !usingShield && rightMousePressed &&
                 !rightMouseWasPressed && targetedBlock.hit)
             {
-                const BlockType targetedType = world.getBlockState(
+                const BlockType targetedType = world->getBlockState(
                     targetedBlock.blockPosition.x,
                     targetedBlock.blockPosition.y,
                     targetedBlock.blockPosition.z
@@ -712,13 +714,13 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 if (targetedType == BlockType::Farmland &&
                     plantedCrop != BlockType::Air &&
                     placementPosition.y == targetedBlock.blockPosition.y + 1 &&
-                    world.getBlock(
+                    world->getBlock(
                         placementPosition.x,
                         placementPosition.y,
                         placementPosition.z
                     ) == BlockType::Air)
                 {
-                    if (world.setBlock(
+                    if (world->setBlock(
                             placementPosition.x,
                             placementPosition.y,
                             placementPosition.z,
@@ -737,7 +739,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     if (isFurnace(targetedType))
                     {
                         inventoryUI.openFurnace(
-                            world.getOrCreateFurnace(
+                            world->getOrCreateFurnace(
                                 targetedBlock.blockPosition.x,
                                 targetedBlock.blockPosition.y,
                                 targetedBlock.blockPosition.z
@@ -746,7 +748,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     }
                     else if (targetedType == BlockType::Chest)
                     {
-                        const ChestInventoryView chest = world.getChestInventory(
+                        const ChestInventoryView chest = world->getChestInventory(
                             targetedBlock.blockPosition.x,
                             targetedBlock.blockPosition.y,
                             targetedBlock.blockPosition.z
@@ -782,12 +784,12 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 }
                 else if (targetedType == BlockType::Lever)
                 {
-                    const auto leverState = world.getBlockState(
+                    const auto leverState = world->getBlockState(
                         targetedBlock.blockPosition.x,
                         targetedBlock.blockPosition.y,
                         targetedBlock.blockPosition.z
                     );
-                    world.setBlockAndMetadata(
+                    world->setBlockAndMetadata(
                         targetedBlock.blockPosition.x,
                         targetedBlock.blockPosition.y,
                         targetedBlock.blockPosition.z,
@@ -801,7 +803,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 {
                     const BlockType selectedBlock =
                         inventory.getSelectedBlock();
-                    if (world.getBlock(
+                    if (world->getBlock(
                             placementPosition.x,
                             placementPosition.y,
                             placementPosition.z) == BlockType::Air &&
@@ -810,7 +812,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                             selectedBlock) &&
                         selectedBlock != BlockType::Air &&
                         (selectedBlock != BlockType::Chest ||
-                         world.canPlaceChest(
+                         world->canPlaceChest(
                              placementPosition.x,
                              placementPosition.y,
                              placementPosition.z)))
@@ -820,7 +822,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                              selectedBlock == BlockType::Chest)
                                 ? furnacePlacementMetadata(camera.getForward())
                                 : 0U;
-                        if (world.setBlockAndMetadata(
+                        if (world->setBlockAndMetadata(
                             placementPosition.x,
                             placementPosition.y,
                             placementPosition.z,
@@ -839,7 +841,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
 
             // Refresh the selection immediately after an edit.
             targetedBlock = Raycast::cast(
-                world,
+                *world,
                 camera.getPosition(),
                 camera.getForward(),
                 blockReach
@@ -874,10 +876,10 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 partialGameTick
             );
             const AtmosphereState atmosphereState = atmosphere.sample(
-                world,
+                *world,
                 player,
                 camera.getPosition(),
-                world.getRenderDistance(),
+                world->getRenderDistance(),
                 partialGameTick
             );
             const float verticalFieldOfView = glm::radians(
@@ -943,18 +945,18 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             glDisable(GL_BLEND);
             glDepthMask(GL_TRUE);
             const Frustum frustum(projection * view);
-            world.drawOpaque(frustum);
+            world->drawOpaque(frustum);
 
             // Both leaf modes are alpha-tested, depth-writing geometry. Fast
             // mode uses its culled opaque-volume mesh; fancy mode preserves
             // faces between neighbouring transparent leaf blocks.
             blockShader.setBool("fastLeaves", fastLeaves);
-            world.drawLeaves(fastLeaves);
+            world->drawLeaves(fastLeaves);
 
             // Plants and ladders remain in the normal cutout pass.
             glDisable(GL_BLEND);
             glDepthMask(GL_TRUE);
-            world.drawCutout();
+            world->drawCutout();
 
             itemEntities.draw(
                 partialGameTick,
@@ -980,7 +982,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
 
             if (targetedBlock.hit)
             {
-                const BlockType targetedType = world.getBlock(
+                const BlockType targetedType = world->getBlock(
                     targetedBlock.blockPosition.x,
                     targetedBlock.blockPosition.y,
                     targetedBlock.blockPosition.z
@@ -1021,7 +1023,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             glDisable(GL_BLEND);
             glDepthMask(GL_TRUE);
             glDisable(GL_CULL_FACE);
-            world.drawLava();
+            world->drawLava();
 
             // Water is the only blended block pass. Chunks are rendered back
             // to front and depth writes remain disabled, while lava/terrain
@@ -1029,7 +1031,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(GL_FALSE);
-            world.drawWater(camera.getPosition());
+            world->drawWater(camera.getPosition());
 
             glEnable(GL_CULL_FACE);
             glDepthMask(GL_TRUE);
@@ -1040,10 +1042,11 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 projection * view
             );
 
+            std::optional<int> requestedNewWorldSeed;
             if (player.isAlive())
             {
-                debugOverlay.draw(
-                    world,
+                requestedNewWorldSeed = debugOverlay.draw(
+                    *world,
                     player,
                     camera,
                     atmosphere,
@@ -1106,10 +1109,92 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             debugOverlay.render();
 
             glfwSwapBuffers(window);
+
+            if (requestedNewWorldSeed)
+            {
+                if (inventoryUI.isOpen())
+                    inventoryUI.close(inventory);
+
+                if (!SaveGame::wipeAll(saveMessage))
+                {
+                    debugOverlay.setWorldResetStatus(saveMessage);
+                    std::cerr << saveMessage << '\n';
+                    continue;
+                }
+                const std::string wipeMessage = saveMessage;
+
+                // Destroy the old world first so its workers stop and its GPU
+                // meshes are released while the OpenGL context is current.
+                world.reset();
+                world = std::make_unique<World>(
+                    startupRenderDistance,
+                    *requestedNewWorldSeed
+                );
+                world->update(spawnColumn);
+                world->finishInitialLoad();
+                world->setRenderDistance(gameplayRenderDistance);
+
+                spawnFeetPosition.y = static_cast<float>(
+                    world->getHighestSolidBlockY(
+                        spawnBlockX,
+                        spawnBlockZ
+                    ) + 1
+                );
+                player.respawn(spawnFeetPosition);
+                inventory = Inventory{};
+                itemEntities.clear();
+                atmosphere.setWorldTime(0);
+                camera.setPosition(player.getEyePosition());
+                camera.resetMouseTracking();
+                postProcessor.invalidateHistory();
+                blockBreakingController.reset();
+                gameClock = mc::engine::FixedStepClock(20.0, 5);
+                previousFrameTime = glfwGetTime();
+                rightMouseWasPressed = false;
+                escapeWasPressed = false;
+                inventoryWasPressed = false;
+                dropWasPressed = false;
+                deathScreenActive = false;
+                cursorCaptured = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                if (glfwRawMouseMotionSupported() == GLFW_TRUE)
+                {
+                    glfwSetInputMode(
+                        window,
+                        GLFW_RAW_MOUSE_MOTION,
+                        GLFW_TRUE
+                    );
+                }
+
+                const GameSaveData freshSave = captureSaveData(
+                    *world,
+                    player,
+                    inventory,
+                    atmosphere
+                );
+                if (!SaveGame::save(
+                        savePath,
+                        freshSave,
+                        saveMessage,
+                        gameBootstrap.content()))
+                {
+                    saveMessage = "New world loaded, but its initial save failed: " +
+                        saveMessage;
+                    std::cerr << saveMessage << '\n';
+                }
+                else
+                {
+                    saveMessage = wipeMessage + "; created seed " +
+                        std::to_string(*requestedNewWorldSeed);
+                }
+                debugOverlay.setWorldResetStatus(saveMessage);
+                std::cout << "Created new world with seed "
+                          << *requestedNewWorldSeed << '\n';
+            }
         }
 
         const GameSaveData finalSave = captureSaveData(
-            world, player, inventory, atmosphere
+            *world, player, inventory, atmosphere
         );
         if (!SaveGame::save(
                 savePath,

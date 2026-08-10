@@ -40,4 +40,5 @@ namespace SaveGame
     std::string& message,
     const mc::content::ContentCatalog& content
 );
+[[nodiscard]] bool wipeAll(std::string& message);
 }

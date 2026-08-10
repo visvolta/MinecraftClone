@@ -3,16 +3,27 @@
 #include "content/resources/ResourcePack.h"
 #include "game/GameBootstrap.h"
 #include "gameplay/SurvivalStats.h"
+#include "worldgen/BetaSimplexNoise.h"
 #include "worldgen/Biome.h"
 #include "worldgen/BiomeMap.h"
+#include "worldgen/JavaRandom.h"
 
 #include <cassert>
+#include <cmath>
 #include <filesystem>
+#include <vector>
 
 int main()
 {
     static_assert(Chunk::HEIGHT == 256);
     static_assert(Chunk::SECTION_COUNT == 16);
+
+    JavaRandom simplexRandom(2345LL);
+    const BetaSimplexNoise simplex(simplexRandom);
+    std::vector<double> simplexOutput;
+    simplex.add(simplexOutput, 0.0, 0.0, 1, 1, 0.0225, 0.0225, 1.0);
+    assert(simplexOutput.size() == 1U);
+    assert(std::isfinite(simplexOutput.front()));
 
     Chunk highChunk(4, -2);
     assert(highChunk.setBlock(3, 220, 7, BlockType::Stone));

@@ -68,6 +68,15 @@ void BetaSimplexNoise::add(
     double scaleZ,
     double amplitude) const
 {
+    if (sizeX <= 0 || sizeZ <= 0)
+        return;
+
+    const std::size_t requiredSize =
+        static_cast<std::size_t>(sizeX) *
+        static_cast<std::size_t>(sizeZ);
+    if (output.size() < requiredSize)
+        output.resize(requiredSize, 0.0);
+
     std::size_t outputIndex = 0;
 
     for (int xIndex = 0;

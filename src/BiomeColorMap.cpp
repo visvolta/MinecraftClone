@@ -30,7 +30,7 @@ double swampGrassNoise(int worldX, int worldZ)
 {
     static JavaRandom random(2345LL);
     static const BetaSimplexNoise noise(random);
-    std::vector<double> value;
+    std::vector<double> value(1, 0.0);
     noise.add(
         value,
         static_cast<double>(worldX),

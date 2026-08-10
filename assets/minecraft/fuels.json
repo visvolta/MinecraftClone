@@ -1,0 +1,30 @@
+{
+  "fuels": [
+    {
+      "items": [
+        "minecraft:stick",
+        "minecraft:oak_sapling",
+        "minecraft:spruce_sapling",
+        "minecraft:birch_sapling"
+      ],
+      "burn_time": 100
+    },
+    {
+      "items": ["minecraft:coal", "minecraft:charcoal"],
+      "burn_time": 1600
+    },
+    {
+      "items": [
+        "minecraft:oak_log",
+        "minecraft:spruce_log",
+        "minecraft:birch_log",
+        "minecraft:oak_planks",
+        "minecraft:spruce_planks",
+        "minecraft:birch_planks",
+        "minecraft:chest",
+        "minecraft:crafting_table"
+      ],
+      "burn_time": 300
+    }
+  ]
+}

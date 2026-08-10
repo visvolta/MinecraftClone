@@ -1,0 +1,12 @@
+{
+  "recipes": [
+    {"input":"minecraft:iron_ore","result":{"item":"minecraft:iron_ingot"}},
+    {"input":"minecraft:gold_ore","result":{"item":"minecraft:gold_ingot"}},
+    {"input":"minecraft:diamond_ore","result":{"item":"minecraft:diamond"}},
+    {"input":"minecraft:cobblestone","result":{"item":"minecraft:stone"}},
+    {"input":"minecraft:clay_ball","result":{"item":"minecraft:brick"}},
+    {"input":"minecraft:oak_log","result":{"item":"minecraft:charcoal"}},
+    {"input":"minecraft:spruce_log","result":{"item":"minecraft:charcoal"}},
+    {"input":"minecraft:birch_log","result":{"item":"minecraft:charcoal"}}
+  ]
+}

@@ -1,0 +1,1624 @@
+#include "World.h"
+
+#include "AssetPaths.h"
+#include "TerrainGenerator.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <thread>
+#include <utility>
+#include <vector>
+
+namespace
+{
+using Clock = std::chrono::steady_clock;
+
+double elapsedMilliseconds(Clock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(
+        Clock::now() - start
+    ).count();
+}
+}
+
+World::World(int renderDistance, int seed)
+    : biomeColours_(
+          AssetPaths::get("textures/grasscolor.png"),
+          AssetPaths::get("textures/foliage.png")),
+      fluidSystem_(*this, static_cast<std::uint32_t>(seed)),
+      farmingSystem_(static_cast<std::uint64_t>(static_cast<std::uint32_t>(seed))),
+      seed_(seed),
+      renderDistance_(std::max(0, renderDistance)),
+      unloadDistance_(std::max(0, renderDistance) + 1)
+{
+    generationThread_ = std::thread(&World::generationWorker, this);
+    const unsigned int hardwareThreads = std::thread::hardware_concurrency();
+    const unsigned int meshWorkerCount = hardwareThreads >= 6U ? 2U : 1U;
+    meshThreads_.reserve(meshWorkerCount);
+    for (unsigned int worker = 0; worker < meshWorkerCount; ++worker)
+        meshThreads_.emplace_back(&World::meshWorker, this);
+}
+
+void World::tick()
+{
+    fluidSystem_.tick();
+    farmingSystem_.tick(*this);
+    redstoneSystem_.tick(*this);
+
+    struct FurnaceStateChange
+    {
+        BlockPosition position;
+        bool burning = false;
+    };
+    std::vector<FurnaceStateChange> changes;
+    changes.reserve(blockEntities_.entries().size());
+    for (auto& [position, value] : blockEntities_.entries())
+    {
+        FurnaceBlockEntity* furnace =
+            dynamic_cast<FurnaceBlockEntity*>(value.get());
+        if (furnace != nullptr &&
+            isBlockLoaded(position.x, position.y, position.z) &&
+            furnace->tick())
+        {
+            changes.push_back({position, furnace->isBurning()});
+        }
+    }
+
+    for (const FurnaceStateChange& change : changes)
+    {
+        const BlockPosition& position = change.position;
+        const mc::content::BlockState current = getBlockState(
+            position.x, position.y, position.z
+        );
+        if (!isFurnace(current.block()))
+            continue;
+
+        setBlockState(
+            position.x,
+            position.y,
+            position.z,
+            mc::content::BlockState(
+                change.burning ? BlockType::LitFurnace : BlockType::Furnace,
+                current.properties()
+            )
+        );
+    }
+}
+
+World::~World()
+{
+    stopping_.store(true);
+
+    generationCv_.notify_all();
+    meshCv_.notify_all();
+
+    if (generationThread_.joinable())
+    {
+        generationThread_.join();
+    }
+
+    for (std::thread& meshThread : meshThreads_)
+    {
+        if (meshThread.joinable())
+            meshThread.join();
+    }
+}
+
+void World::update(const glm::vec3& cameraPosition)
+{
+    rethrowWorkerException();
+
+    const auto start = Clock::now();
+
+    const int newChunkX = worldToChunk(cameraPosition.x, Chunk::WIDTH);
+    const int newChunkZ = worldToChunk(cameraPosition.z, Chunk::DEPTH);
+
+    if (!initialized_ ||
+        newChunkX != cameraChunkX_ ||
+        newChunkZ != cameraChunkZ_)
+    {
+        cameraChunkX_ = newChunkX;
+        cameraChunkZ_ = newChunkZ;
+        initialized_ = true;
+
+        refreshDesiredChunks(cameraChunkX_, cameraChunkZ_);
+    }
+
+    // Upload completed urgent edits before doing more CPU lighting work.
+    integrateCompletedJobs(2.0);
+
+    // Edited chunks are inserted at the front of the lighting queue. A larger
+    // but still bounded budget makes local changes settle quickly.
+    for (const auto& updated : lighting_.process(chunkManager_, 3.0))
+        handleLightingUpdate(updated);
+
+    // A second small integration pass lets a completed edit mesh reach the
+    // GPU in the same frame instead of waiting for the next update.
+    integrateCompletedJobs(1.0);
+
+    worldUpdateMilliseconds_ = elapsedMilliseconds(start);
+    rethrowWorkerException();
+}
+
+void World::finishInitialLoad()
+{
+    // main.cpp starts with render distance 1, so this prepares only a 3x3
+    // spawn area. Lighting and mesh jobs are integrated incrementally.
+    while (getLoadedChunkCount() < desiredChunks_.size() ||
+           getPendingChunkCount() != 0)
+    {
+        rethrowWorkerException();
+
+        integrateCompletedJobs(8.0);
+
+        for (const auto& updated : lighting_.process(chunkManager_, 4.0))
+            handleLightingUpdate(updated);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    // Give the centre area a small bounded head start. Do not block until
+    // every neighbour relight/remesh job settles; the normal update loop will
+    // finish those smoothly after the window begins rendering.
+    const auto settleStart = Clock::now();
+    while (elapsedMilliseconds(settleStart) < 75.0)
+    {
+        rethrowWorkerException();
+        integrateCompletedJobs(4.0);
+
+        for (const auto& updated : lighting_.process(chunkManager_, 2.0))
+            handleLightingUpdate(updated);
+
+        if (getPendingLightingCount() == 0 &&
+            getPendingMeshCount() == 0)
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    rethrowWorkerException();
+}
+
+void World::drawOpaque(const Frustum& frustum)
+{
+    drawnChunks_ = 0;
+    culledChunks_ = 0;
+    visibleMeshes_.clear();
+    visibleMeshes_.reserve(chunkMeshes_.size());
+
+    for (const auto& entry : chunkMeshes_)
+    {
+        const ChunkMesh* mesh = entry.second.get();
+        if (mesh == nullptr)
+        {
+            continue;
+        }
+
+        const glm::vec3 minimum(
+            static_cast<float>(mesh->getChunkX() * Chunk::WIDTH),
+            0.0f,
+            static_cast<float>(mesh->getChunkZ() * Chunk::DEPTH)
+        );
+
+        const glm::vec3 maximum =
+            minimum +
+            glm::vec3(
+                static_cast<float>(Chunk::WIDTH),
+                static_cast<float>(Chunk::HEIGHT),
+                static_cast<float>(Chunk::DEPTH)
+            );
+
+        if (!frustum.intersectsAabb(minimum, maximum))
+        {
+            ++culledChunks_;
+            continue;
+        }
+
+        std::uint16_t sectionMask = 0;
+        for (int section = 0; section < Chunk::SECTION_COUNT; ++section)
+        {
+            const glm::vec3 sectionMinimum(
+                minimum.x,
+                static_cast<float>(section * Chunk::SECTION_HEIGHT),
+                minimum.z
+            );
+            const glm::vec3 sectionMaximum(
+                maximum.x,
+                static_cast<float>((section + 1) * Chunk::SECTION_HEIGHT),
+                maximum.z
+            );
+            if (frustum.intersectsAabb(sectionMinimum, sectionMaximum))
+            {
+                sectionMask |= static_cast<std::uint16_t>(
+                    1U << static_cast<unsigned int>(section)
+                );
+            }
+        }
+        if (sectionMask == 0)
+        {
+            ++culledChunks_;
+            continue;
+        }
+
+        visibleMeshes_.push_back({mesh, sectionMask});
+        if (mesh->hasOpaque())
+            mesh->drawOpaque(sectionMask);
+        ++drawnChunks_;
+    }
+}
+
+void World::drawCutout() const
+{
+    for (const VisibleMesh& visible : visibleMeshes_)
+    {
+        if (visible.mesh->hasCutout())
+            visible.mesh->drawCutout(visible.sectionMask);
+    }
+}
+
+void World::drawLeaves(bool fast) const
+{
+    for (const VisibleMesh& visible : visibleMeshes_)
+    {
+        const ChunkMesh* mesh = visible.mesh;
+        if (!mesh->hasLeaves(fast))
+            continue;
+        if (fast)
+            mesh->drawFastLeaves(visible.sectionMask);
+        else
+            mesh->drawFancyLeaves(visible.sectionMask);
+    }
+}
+
+void World::drawLava() const
+{
+    for (const VisibleMesh& visible : visibleMeshes_)
+    {
+        if (visible.mesh->hasLava())
+            visible.mesh->drawLava(visible.sectionMask);
+    }
+}
+
+void World::drawWater(
+    const glm::vec3& cameraPosition) const
+{
+    struct VisibleTransparentChunk
+    {
+        const ChunkMesh* mesh = nullptr;
+        std::uint16_t sectionMask = 0;
+        float distanceSquared = 0.0f;
+    };
+    std::vector<VisibleTransparentChunk> visible;
+    visible.reserve(visibleMeshes_.size());
+
+    for (const VisibleMesh& meshVisibility : visibleMeshes_)
+    {
+        const ChunkMesh* mesh = meshVisibility.mesh;
+        if (!mesh->hasWater())
+            continue;
+
+        const glm::vec3 minimum(
+            static_cast<float>(mesh->getChunkX() * Chunk::WIDTH),
+            0.0f,
+            static_cast<float>(mesh->getChunkZ() * Chunk::DEPTH)
+        );
+
+        const glm::vec3 maximum =
+            minimum +
+            glm::vec3(
+                static_cast<float>(Chunk::WIDTH),
+                static_cast<float>(Chunk::HEIGHT),
+                static_cast<float>(Chunk::DEPTH)
+            );
+
+        const glm::vec3 centre = (minimum + maximum) * 0.5f;
+        const glm::vec3 difference = centre - cameraPosition;
+        visible.push_back({
+            mesh,
+            meshVisibility.sectionMask,
+            glm::dot(difference, difference)
+        });
+    }
+
+    std::sort(
+        visible.begin(),
+        visible.end(),
+        [](const VisibleTransparentChunk& left,
+           const VisibleTransparentChunk& right)
+        {
+            return left.distanceSquared > right.distanceSquared;
+        }
+    );
+    for (const VisibleTransparentChunk& chunk : visible)
+        chunk.mesh->drawWater(chunk.sectionMask);
+}
+
+BlockType World::getBlock(int worldX, int worldY, int worldZ) const
+{
+    return getBlockState(worldX, worldY, worldZ).block();
+}
+
+mc::content::BlockState World::getBlockState(
+    int worldX,
+    int worldY,
+    int worldZ) const
+{
+    return chunkManager_.getBlockStateWorld(worldX, worldY, worldZ);
+}
+
+std::uint8_t World::getBlockMetadata(
+    int worldX,
+    int worldY,
+    int worldZ) const
+{
+    return getBlockState(worldX, worldY, worldZ).properties();
+}
+
+bool World::isSolidBlock(int worldX, int worldY, int worldZ) const
+{
+    return isSolid(getBlock(worldX, worldY, worldZ));
+}
+
+bool World::isBlockLoaded(int worldX, int worldY, int worldZ) const
+{
+    if (worldY < 0 || worldY >= Chunk::HEIGHT)
+        return false;
+    return chunkManager_.hasChunk(
+        floorDivide(worldX, Chunk::WIDTH),
+        floorDivide(worldZ, Chunk::DEPTH)
+    );
+}
+
+bool World::setBlock(
+    int worldX,
+    int worldY,
+    int worldZ,
+    BlockType block)
+{
+    return setBlockState(
+        worldX,
+        worldY,
+        worldZ,
+        mc::content::BlockState(block)
+    );
+}
+
+bool World::setBlockAndMetadata(
+    int worldX,
+    int worldY,
+    int worldZ,
+    BlockType block,
+    std::uint8_t metadata)
+{
+    return setBlockState(
+        worldX,
+        worldY,
+        worldZ,
+        mc::content::BlockState(block, metadata)
+    );
+}
+
+bool World::setBlockState(
+    int worldX,
+    int worldY,
+    int worldZ,
+    mc::content::BlockState state)
+{
+    if (worldY < 0 || worldY >= Chunk::HEIGHT)
+    {
+        return false;
+    }
+
+    const mc::content::BlockState oldState = getBlockState(
+        worldX, worldY, worldZ
+    );
+    if (oldState == state)
+        return false;
+
+    const BlockType oldBlock = oldState.block();
+    const BlockType block = state.block();
+
+    // Ladders currently have a fixed +Z-facing plane, so their supporting
+    // block is the neighbour directly behind them at Z-1.
+    if (isLadder(block) &&
+        !isSolid(getBlock(worldX, worldY, worldZ - 1)))
+    {
+        return false;
+    }
+
+    if (!chunkManager_.setBlockStateWorld(
+            worldX,
+            worldY,
+            worldZ,
+            state))
+    {
+        return false;
+    }
+
+    blockEntities_.onBlockChanged(
+        {worldX, worldY, worldZ}, oldBlock, block
+    );
+
+    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+    const ChunkKey changedChunkKey = makeKey(chunkX, chunkZ);
+    modifiedChunks_.insert(changedChunkKey);
+    persistedChunkSnapshots_.erase(changedChunkKey);
+
+    // Beta flowers, mushrooms, and tall grass check support when a neighbour
+    // changes. Remove the plant immediately when its supporting block breaks.
+    if (worldY + 1 < Chunk::HEIGHT)
+    {
+        const BlockType above =
+            getBlock(worldX, worldY + 1, worldZ);
+
+        if (isPlant(above))
+        {
+            const bool mushroom =
+                above == BlockType::BrownMushroom ||
+                above == BlockType::RedMushroom;
+
+            const bool supported = mushroom
+                ? isOpaque(block)
+                : (block == BlockType::Grass ||
+                   block == BlockType::Dirt);
+
+            if (!supported)
+            {
+                // Route dependent removals through the normal edit path so
+                // fluids, lighting, and cross-chunk meshes all receive the
+                // same neighbour notifications as a direct block edit.
+                setBlockAndMetadata(
+                    worldX,
+                    worldY + 1,
+                    worldZ,
+                    BlockType::Air,
+                    0
+                );
+            }
+        }
+    }
+
+    const BlockType frontNeighbour =
+        getBlock(worldX, worldY, worldZ + 1);
+    if (isLadder(frontNeighbour) && !isSolid(block))
+    {
+        setBlockAndMetadata(
+            worldX,
+            worldY,
+            worldZ + 1,
+            BlockType::Air,
+            0
+        );
+    }
+
+    // Geometry/topology should respond immediately. Do not wait for the
+    // more expensive lighting pass before rebuilding the edited area.
+    queueMeshesForBlockEdit(worldX, worldZ, true);
+
+    // A changing fluid level alters only its sloped mesh. Re-light only when
+    // occupancy/material changes, otherwise every spreading level would
+    // enqueue an unnecessary nine-chunk lighting pass.
+    if (oldBlock != block)
+        lighting_.queueChunkAndNeighboursHighPriority(chunkX, chunkZ);
+    fluidSystem_.onBlockChanged(
+        worldX,
+        worldY,
+        worldZ,
+        oldBlock,
+        block
+    );
+    redstoneSystem_.onBlockChanged(worldX, worldY, worldZ);
+    return true;
+}
+
+FurnaceBlockEntity* World::getFurnace(
+    int worldX,
+    int worldY,
+    int worldZ) noexcept
+{
+    return blockEntities_.getFurnace({worldX, worldY, worldZ});
+}
+
+FurnaceBlockEntity& World::getOrCreateFurnace(
+    int worldX,
+    int worldY,
+    int worldZ)
+{
+    return blockEntities_.getOrCreateFurnace({worldX, worldY, worldZ});
+}
+
+ChestBlockEntity* World::getChest(
+    int worldX,
+    int worldY,
+    int worldZ) noexcept
+{
+    return blockEntities_.getChest({worldX, worldY, worldZ});
+}
+
+ChestBlockEntity& World::getOrCreateChest(
+    int worldX, int worldY, int worldZ)
+{
+    return blockEntities_.getOrCreateChest({worldX, worldY, worldZ});
+}
+
+bool World::canPlaceChest(int x, int y, int z) const
+{
+    constexpr std::array<glm::ivec3, 4> directions{{
+        {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}
+    }};
+    int adjacent = 0;
+    for (const glm::ivec3& direction : directions)
+    {
+        if (getBlock(x + direction.x, y, z + direction.z) != BlockType::Chest)
+            continue;
+        ++adjacent;
+        for (const glm::ivec3& other : directions)
+        {
+            if (other == -direction)
+                continue;
+            if (getBlock(
+                    x + direction.x + other.x,
+                    y,
+                    z + direction.z + other.z) == BlockType::Chest)
+            {
+                return false;
+            }
+        }
+    }
+    return adjacent <= 1;
+}
+
+bool World::canOpenChest(int x, int y, int z) const
+{
+    if (getBlock(x, y, z) != BlockType::Chest ||
+        isOpaque(getBlock(x, y + 1, z)))
+    {
+        return false;
+    }
+    constexpr std::array<glm::ivec3, 4> directions{{
+        {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}
+    }};
+    for (const glm::ivec3& direction : directions)
+    {
+        if (getBlock(x + direction.x, y, z + direction.z) == BlockType::Chest &&
+            isOpaque(getBlock(x + direction.x, y + 1, z + direction.z)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+ChestInventoryView World::getChestInventory(int x, int y, int z)
+{
+    if (!canOpenChest(x, y, z))
+        return {};
+    ChestBlockEntity* current = &getOrCreateChest(x, y, z);
+    if (getBlock(x - 1, y, z) == BlockType::Chest)
+        return {&getOrCreateChest(x - 1, y, z), current};
+    if (getBlock(x, y, z - 1) == BlockType::Chest)
+        return {&getOrCreateChest(x, y, z - 1), current};
+    if (getBlock(x + 1, y, z) == BlockType::Chest)
+        return {current, &getOrCreateChest(x + 1, y, z)};
+    if (getBlock(x, y, z + 1) == BlockType::Chest)
+        return {current, &getOrCreateChest(x, y, z + 1)};
+    return {current, nullptr};
+}
+
+std::vector<ItemStack> World::copyBlockEntityContents(
+    int worldX, int worldY, int worldZ) const
+{
+    return blockEntities_.copyContainerContents({worldX, worldY, worldZ});
+}
+
+int World::getSeed() const noexcept
+{
+    return seed_;
+}
+
+std::vector<ChunkSnapshot> World::getModifiedChunkSnapshots() const
+{
+    std::vector<ChunkSnapshot> result;
+    result.reserve(modifiedChunks_.size());
+    for (const ChunkKey key : modifiedChunks_)
+    {
+        bool foundLoaded = false;
+        for (const Chunk* chunk : chunkManager_.getChunks())
+        {
+            if (chunk != nullptr && makeKey(chunk->getChunkX(), chunk->getChunkZ()) == key)
+            {
+                result.push_back(chunk->snapshot());
+                foundLoaded = true;
+                break;
+            }
+        }
+        if (!foundLoaded)
+        {
+            if (const auto saved = persistedChunkSnapshots_.find(key);
+                saved != persistedChunkSnapshots_.end())
+            {
+                result.push_back(saved->second);
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<BlockEntityRecord> World::getBlockEntitySnapshots() const
+{
+    return blockEntities_.snapshot();
+}
+
+std::vector<FluidScheduledTickSnapshot>
+World::getScheduledFluidTickSnapshots() const
+{
+    return fluidSystem_.snapshotScheduledTicks();
+}
+
+void World::restorePersistentState(
+    std::vector<ChunkSnapshot> chunks,
+    std::vector<BlockEntityRecord> blockEntities,
+    const std::vector<FluidScheduledTickSnapshot>& fluidTicks)
+{
+    modifiedChunks_.clear();
+    persistedChunkSnapshots_.clear();
+    for (ChunkSnapshot& chunk : chunks)
+    {
+        const ChunkKey key = makeKey(chunk.chunkX, chunk.chunkZ);
+        modifiedChunks_.insert(key);
+        persistedChunkSnapshots_.insert_or_assign(key, std::move(chunk));
+    }
+    blockEntities_.restore(std::move(blockEntities));
+    fluidSystem_.restoreScheduledTicks(fluidTicks);
+}
+
+bool World::isSmoothLightingEnabled() const noexcept
+{
+    return smoothLighting_;
+}
+
+void World::setSmoothLightingEnabled(bool enabled)
+{
+    if (smoothLighting_ == enabled)
+        return;
+    smoothLighting_ = enabled;
+    for (const Chunk* chunk : chunkManager_.getChunks())
+    {
+        if (chunk != nullptr)
+            queueChunkMesh(chunk->getChunkX(), chunk->getChunkZ(), true);
+    }
+}
+
+bool World::isFastLeavesEnabled() const noexcept
+{
+    return fastLeaves_;
+}
+
+void World::setFastLeavesEnabled(bool enabled)
+{
+    if (fastLeaves_ == enabled)
+        return;
+    fastLeaves_ = enabled;
+    for (const Chunk* chunk : chunkManager_.getChunks())
+    {
+        if (chunk != nullptr)
+            queueChunkMesh(chunk->getChunkX(), chunk->getChunkZ(), true);
+    }
+}
+
+glm::vec3 World::getFluidFlowVector(
+    int worldX,
+    int worldY,
+    int worldZ,
+    BlockType liquid) const
+{
+    return fluidSystem_.getFlowVector(
+        worldX,
+        worldY,
+        worldZ,
+        liquid
+    );
+}
+
+int World::getHighestSolidBlockY(int worldX, int worldZ) const
+{
+    for (int worldY = Chunk::HEIGHT - 1; worldY >= 0; --worldY)
+    {
+        if (isSolidBlock(worldX, worldY, worldZ))
+        {
+            return worldY;
+        }
+    }
+
+    return -1;
+}
+
+
+BiomeId World::getBiomeAt(int worldX, int worldZ) const
+{
+    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+    const Chunk* chunk = chunkManager_.getChunk(chunkX, chunkZ);
+
+    if (chunk == nullptr)
+    {
+        return VanillaBiomes::Plains;
+    }
+
+    const int localX = positiveModulo(worldX, Chunk::WIDTH);
+    const int localZ = positiveModulo(worldZ, Chunk::DEPTH);
+
+    return chunk->getBiome(localX, localZ);
+}
+
+float World::getTemperatureAt(int worldX, int worldZ) const
+{
+    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+    const Chunk* chunk = chunkManager_.getChunk(chunkX, chunkZ);
+    if (chunk == nullptr)
+        return 0.5f;
+
+    return chunk->getTemperature(
+        positiveModulo(worldX, Chunk::WIDTH),
+        positiveModulo(worldZ, Chunk::DEPTH)
+    );
+}
+
+int World::getSkyLightLevel(
+    int worldX,
+    int worldY,
+    int worldZ) const
+{
+    if (worldY >= Chunk::HEIGHT)
+        return 15;
+    if (worldY < 0)
+        return 0;
+
+    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+    const Chunk* chunk = chunkManager_.getChunk(chunkX, chunkZ);
+    if (chunk == nullptr)
+        return 15;
+
+    return chunk->getSkyLight(
+        positiveModulo(worldX, Chunk::WIDTH),
+        worldY,
+        positiveModulo(worldZ, Chunk::DEPTH)
+    );
+}
+
+int World::getBlockLightLevel(
+    int worldX,
+    int worldY,
+    int worldZ) const
+{
+    if (worldY < 0 || worldY >= Chunk::HEIGHT)
+        return 0;
+
+    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+    const Chunk* chunk = chunkManager_.getChunk(chunkX, chunkZ);
+    if (chunk == nullptr)
+        return 0;
+
+    return chunk->getBlockLight(
+        positiveModulo(worldX, Chunk::WIDTH),
+        worldY,
+        positiveModulo(worldZ, Chunk::DEPTH)
+    );
+}
+
+
+void World::setRenderDistance(int renderDistance)
+{
+    const int clampedDistance = std::clamp(renderDistance, 2, 16);
+    if (clampedDistance == renderDistance_)
+        return;
+
+    renderDistance_ = clampedDistance;
+    unloadDistance_ = renderDistance_ + 1;
+
+    if (initialized_)
+        refreshDesiredChunks(cameraChunkX_, cameraChunkZ_);
+}
+
+int World::getRenderDistance() const noexcept
+{
+    return renderDistance_;
+}
+
+const ChunkManager& World::getChunkManager() const noexcept
+{
+    return chunkManager_;
+}
+
+ChunkManager& World::getChunkManager() noexcept
+{
+    return chunkManager_;
+}
+
+std::size_t World::getLoadedChunkCount() const noexcept
+{
+    return chunkManager_.getChunkCount();
+}
+
+int World::getVisibleFaceCount() const noexcept
+{
+    return visibleFaceCount_;
+}
+
+int World::getVertexCount() const noexcept
+{
+    return vertexCount_;
+}
+
+std::size_t World::getPendingChunkCount() const
+{
+    std::scoped_lock lock(generationMutex_);
+    return generationInFlight_.size();
+}
+
+std::size_t World::getPendingMeshCount() const
+{
+    std::scoped_lock lock(meshMutex_);
+    return meshInFlight_.size();
+}
+
+int World::getDrawnChunkCount() const noexcept
+{
+    return drawnChunks_;
+}
+
+int World::getCulledChunkCount() const noexcept
+{
+    return culledChunks_;
+}
+
+double World::getTerrainMilliseconds() const noexcept
+{
+    return terrainMilliseconds_;
+}
+
+double World::getMeshMilliseconds() const noexcept
+{
+    return meshMilliseconds_;
+}
+
+double World::getUploadMilliseconds() const noexcept
+{
+    return uploadMilliseconds_;
+}
+
+double World::getWorldUpdateMilliseconds() const noexcept
+{
+    return worldUpdateMilliseconds_;
+}
+
+std::size_t World::getPendingLightingCount() const noexcept
+{
+    return lighting_.getPendingCount();
+}
+
+double World::getLightingMilliseconds() const noexcept
+{
+    return lighting_.getLastUpdateMilliseconds();
+}
+
+std::size_t World::getPendingFluidTickCount() const noexcept
+{
+    return fluidSystem_.getPendingTickCount();
+}
+
+void World::refreshDesiredChunks(int centerChunkX, int centerChunkZ)
+{
+    desiredChunks_.clear();
+
+    std::vector<ChunkCoord> missingChunks;
+    const int diameter = renderDistance_ * 2 + 1;
+    missingChunks.reserve(static_cast<std::size_t>(diameter * diameter));
+
+    for (int chunkZ = centerChunkZ - renderDistance_;
+         chunkZ <= centerChunkZ + renderDistance_;
+         ++chunkZ)
+    {
+        for (int chunkX = centerChunkX - renderDistance_;
+             chunkX <= centerChunkX + renderDistance_;
+             ++chunkX)
+        {
+            const ChunkKey key = makeKey(chunkX, chunkZ);
+            desiredChunks_.insert(key);
+
+            if (!chunkManager_.hasChunk(chunkX, chunkZ))
+            {
+                missingChunks.push_back({chunkX, chunkZ});
+            }
+        }
+    }
+
+    // Drop generation work that the player can no longer see before adding
+    // the new ring. Without this, moving quickly or reducing render distance
+    // leaves the sole terrain worker busy on stale chunks for many seconds.
+    {
+        std::scoped_lock lock(generationMutex_);
+        std::erase_if(
+            generationRequests_,
+            [this](const ChunkCoord& coordinate)
+            {
+                const ChunkKey key = makeKey(coordinate.x, coordinate.z);
+                if (desiredChunks_.contains(key))
+                    return false;
+                generationInFlight_.erase(key);
+                return true;
+            }
+        );
+    }
+
+    std::sort(
+        missingChunks.begin(),
+        missingChunks.end(),
+        [centerChunkX, centerChunkZ](
+            const ChunkCoord& left,
+            const ChunkCoord& right)
+        {
+            const int leftX = left.x - centerChunkX;
+            const int leftZ = left.z - centerChunkZ;
+            const int rightX = right.x - centerChunkX;
+            const int rightZ = right.z - centerChunkZ;
+
+            return leftX * leftX + leftZ * leftZ <
+                   rightX * rightX + rightZ * rightZ;
+        }
+    );
+
+    for (const ChunkCoord& coordinate : missingChunks)
+    {
+        queueChunkGeneration(coordinate.x, coordinate.z);
+    }
+
+    // Existing requests may have been ordered around the previous camera
+    // chunk. Re-sort the small deque so nearest visible terrain always wins.
+    {
+        std::scoped_lock lock(generationMutex_);
+        std::sort(
+            generationRequests_.begin(), generationRequests_.end(),
+            [centerChunkX, centerChunkZ](
+                const ChunkCoord& left,
+                const ChunkCoord& right)
+            {
+                const int leftX = left.x - centerChunkX;
+                const int leftZ = left.z - centerChunkZ;
+                const int rightX = right.x - centerChunkX;
+                const int rightZ = right.z - centerChunkZ;
+                return leftX * leftX + leftZ * leftZ <
+                       rightX * rightX + rightZ * rightZ;
+            }
+        );
+    }
+
+    removeDistantChunks();
+}
+
+void World::queueChunkGeneration(int chunkX, int chunkZ)
+{
+    if (chunkManager_.hasChunk(chunkX, chunkZ))
+    {
+        return;
+    }
+
+    const ChunkKey key = makeKey(chunkX, chunkZ);
+
+    if (const auto saved = persistedChunkSnapshots_.find(key);
+        saved != persistedChunkSnapshots_.end())
+    {
+        auto chunk = std::make_unique<Chunk>(chunkX, chunkZ);
+        chunk->restore(saved->second);
+        std::scoped_lock lock(generationMutex_);
+        if (!generationInFlight_.insert(key).second)
+            return;
+        generationResults_.push_back({std::move(chunk), 0.0});
+        return;
+    }
+
+    {
+        std::scoped_lock lock(generationMutex_);
+
+        if (!generationInFlight_.insert(key).second)
+        {
+            return;
+        }
+
+        generationRequests_.push_back({chunkX, chunkZ});
+    }
+
+    generationCv_.notify_one();
+}
+
+void World::queueChunkMesh(
+    int chunkX,
+    int chunkZ,
+    bool highPriority)
+{
+    if (!chunkManager_.hasChunk(chunkX, chunkZ))
+        return;
+
+    const ChunkKey chunkKey = makeKey(chunkX, chunkZ);
+    std::uint64_t version = 0;
+
+    {
+        std::scoped_lock lock(meshMutex_);
+        version = ++meshVersions_[chunkKey];
+
+        if (highPriority)
+            highPriorityMeshKeys_.insert(chunkKey);
+
+        // Coalesce repeated updates. The completed stale job will enqueue one
+        // fresh snapshot using the newest version instead of building every
+        // intermediate lighting state.
+        if (!meshInFlight_.insert(chunkKey).second)
+            return;
+    }
+
+    ChunkMeshInput input = createMeshInput(chunkX, chunkZ, version);
+
+    {
+        std::scoped_lock lock(meshMutex_);
+        if (highPriority)
+            meshRequests_.emplace_front(std::move(input));
+        else
+            meshRequests_.emplace_back(std::move(input));
+    }
+
+    meshCv_.notify_one();
+}
+
+void World::queueChunkMeshAndNeighbours(
+    int chunkX,
+    int chunkZ,
+    bool highPriority)
+{
+    queueChunkMesh(chunkX, chunkZ, highPriority);
+    queueChunkMesh(chunkX - 1, chunkZ, highPriority);
+    queueChunkMesh(chunkX + 1, chunkZ, highPriority);
+    queueChunkMesh(chunkX, chunkZ - 1, highPriority);
+    queueChunkMesh(chunkX, chunkZ + 1, highPriority);
+}
+
+void World::queueChunkMeshArea(
+    int chunkX,
+    int chunkZ,
+    bool highPriority)
+{
+    // AO reads cardinal and diagonal neighbours, so all nine meshes must be
+    // refreshed when border lighting or occupancy changes.
+    for (int dz = -1; dz <= 1; ++dz)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+            queueChunkMesh(chunkX + dx, chunkZ + dz, highPriority);
+    }
+}
+
+void World::queueMeshesForBlockEdit(
+    int worldX,
+    int worldZ,
+    bool highPriority)
+{
+    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+    const int localX = positiveModulo(worldX, Chunk::WIDTH);
+    const int localZ = positiveModulo(worldZ, Chunk::DEPTH);
+
+    queueChunkMesh(chunkX, chunkZ, highPriority);
+
+    const bool west = localX == 0;
+    const bool east = localX == Chunk::WIDTH - 1;
+    const bool north = localZ == 0;
+    const bool south = localZ == Chunk::DEPTH - 1;
+
+    if (west)  queueChunkMesh(chunkX - 1, chunkZ, highPriority);
+    if (east)  queueChunkMesh(chunkX + 1, chunkZ, highPriority);
+    if (north) queueChunkMesh(chunkX, chunkZ - 1, highPriority);
+    if (south) queueChunkMesh(chunkX, chunkZ + 1, highPriority);
+
+    // AO samples diagonals only when an edit is at a chunk corner.
+    if (west && north)
+        queueChunkMesh(chunkX - 1, chunkZ - 1, highPriority);
+    if (east && north)
+        queueChunkMesh(chunkX + 1, chunkZ - 1, highPriority);
+    if (west && south)
+        queueChunkMesh(chunkX - 1, chunkZ + 1, highPriority);
+    if (east && south)
+        queueChunkMesh(chunkX + 1, chunkZ + 1, highPriority);
+}
+
+void World::handleLightingUpdate(
+    const LightingSystem::UpdatedChunk& update)
+{
+    const ChunkKey key = makeKey(update.x, update.z);
+    if (initialMeshPending_.erase(key) != 0)
+    {
+        // A newly inserted chunk changes occupancy samples for all eight
+        // surrounding meshes regardless of whether its light values happen
+        // to match their previous missing-neighbour fallback.
+        queueChunkMeshArea(update.x, update.z, false);
+        return;
+    }
+    queueMeshesForLightingUpdate(update);
+}
+
+void World::queueMeshesForLightingUpdate(
+    const LightingSystem::UpdatedChunk& update)
+{
+    if (!update.changed)
+        return;
+
+    const bool priority = update.highPriority;
+    queueChunkMesh(update.x, update.z, priority);
+    const std::uint8_t borders = update.changedBorders;
+    if ((borders & LightingSystem::West) != 0)
+        queueChunkMesh(update.x - 1, update.z, priority);
+    if ((borders & LightingSystem::East) != 0)
+        queueChunkMesh(update.x + 1, update.z, priority);
+    if ((borders & LightingSystem::North) != 0)
+        queueChunkMesh(update.x, update.z - 1, priority);
+    if ((borders & LightingSystem::South) != 0)
+        queueChunkMesh(update.x, update.z + 1, priority);
+    if ((borders & LightingSystem::NorthWest) != 0)
+        queueChunkMesh(update.x - 1, update.z - 1, priority);
+    if ((borders & LightingSystem::NorthEast) != 0)
+        queueChunkMesh(update.x + 1, update.z - 1, priority);
+    if ((borders & LightingSystem::SouthWest) != 0)
+        queueChunkMesh(update.x - 1, update.z + 1, priority);
+    if ((borders & LightingSystem::SouthEast) != 0)
+        queueChunkMesh(update.x + 1, update.z + 1, priority);
+}
+
+ChunkMeshInput World::createMeshInput(
+    int chunkX,
+    int chunkZ,
+    std::uint64_t version) const
+{
+    ChunkMeshInput input;
+    input.version = version;
+    input.smoothLighting = smoothLighting_;
+    input.fastLeaves = fastLeaves_;
+
+    const Chunk* center = chunkManager_.getChunk(chunkX, chunkZ);
+    if (center == nullptr)
+        return input;
+
+    input.snapshot = std::make_unique<ChunkMeshSnapshot>();
+    ChunkMeshSnapshot& snapshot = *input.snapshot;
+    snapshot.chunkX = chunkX;
+    snapshot.chunkZ = chunkZ;
+
+    const Chunk* neighbourhood[3][3]{};
+    for (int offsetZ = -1; offsetZ <= 1; ++offsetZ)
+    {
+        for (int offsetX = -1; offsetX <= 1; ++offsetX)
+        {
+            neighbourhood[offsetZ + 1][offsetX + 1] =
+                chunkManager_.getChunk(chunkX + offsetX, chunkZ + offsetZ);
+        }
+    }
+
+    for (int section = 0; section < Chunk::SECTION_COUNT; ++section)
+        snapshot.emptySections[static_cast<std::size_t>(section)] =
+            center->isSectionEmpty(section);
+    for (int z = 0; z < Chunk::DEPTH; ++z)
+    {
+        for (int x = 0; x < Chunk::WIDTH; ++x)
+        {
+            const std::size_t column = static_cast<std::size_t>(
+                x + Chunk::WIDTH * z
+            );
+            snapshot.temperatures[column] = center->getTemperature(x, z);
+            snapshot.humidities[column] = center->getHumidity(x, z);
+            snapshot.biomeIds[column] = center->getBiome(x, z);
+        }
+    }
+
+    for (int y = 0; y < Chunk::HEIGHT; ++y)
+    {
+        for (int z = -ChunkMeshSnapshot::Border;
+             z < Chunk::DEPTH + ChunkMeshSnapshot::Border; ++z)
+        {
+            const int offsetZ = z < 0 ? -1 : (z >= Chunk::DEPTH ? 1 : 0);
+            const int localZ = z < 0 ? z + Chunk::DEPTH
+                : (z >= Chunk::DEPTH ? z - Chunk::DEPTH : z);
+            for (int x = -ChunkMeshSnapshot::Border;
+                 x < Chunk::WIDTH + ChunkMeshSnapshot::Border; ++x)
+            {
+                const int offsetX = x < 0 ? -1 : (x >= Chunk::WIDTH ? 1 : 0);
+                const int localX = x < 0 ? x + Chunk::WIDTH
+                    : (x >= Chunk::WIDTH ? x - Chunk::WIDTH : x);
+                const Chunk* source = neighbourhood[offsetZ + 1][offsetX + 1];
+                const std::size_t sample = ChunkMeshSnapshot::index(x, y, z);
+                if (source != nullptr)
+                {
+                    snapshot.states[sample] = source->getBlockState(localX, y, localZ);
+                    snapshot.skyLight[sample] = source->getSkyLight(localX, y, localZ);
+                    snapshot.blockLight[sample] = source->getBlockLight(localX, y, localZ);
+                }
+                else
+                {
+                    // Match the previous missing-neighbour behavior: blocks
+                    // are air while lighting extends the nearest centre edge.
+                    const int edgeX = std::clamp(x, 0, Chunk::WIDTH - 1);
+                    const int edgeZ = std::clamp(z, 0, Chunk::DEPTH - 1);
+                    snapshot.states[sample] = {};
+                    snapshot.skyLight[sample] = center->getSkyLight(edgeX, y, edgeZ);
+                    snapshot.blockLight[sample] = center->getBlockLight(edgeX, y, edgeZ);
+                }
+            }
+        }
+    }
+
+    return input;
+}
+
+void World::integrateCompletedJobs(double budgetMilliseconds)
+{
+    const auto integrationStart = Clock::now();
+    uploadMilliseconds_ = 0.0;
+    while (elapsedMilliseconds(integrationStart) < budgetMilliseconds)
+    {
+        bool integratedAnything = false;
+
+        GeneratedChunk generatedChunk;
+
+        {
+            std::scoped_lock lock(generationMutex_);
+
+            if (!generationResults_.empty())
+            {
+                generatedChunk = std::move(generationResults_.front());
+                generationResults_.pop_front();
+            }
+        }
+
+        if (generatedChunk.chunk)
+        {
+            const int chunkX = generatedChunk.chunk->getChunkX();
+            const int chunkZ = generatedChunk.chunk->getChunkZ();
+            const ChunkKey key = makeKey(chunkX, chunkZ);
+
+            {
+                std::scoped_lock lock(generationMutex_);
+                generationInFlight_.erase(key);
+            }
+
+            terrainMilliseconds_ = generatedChunk.milliseconds;
+
+            if (desiredChunks_.contains(key))
+            {
+                chunkManager_.insertChunk(std::move(generatedChunk.chunk));
+                initialMeshPending_.insert(key);
+                lighting_.queueChunkAndNeighbours(chunkX, chunkZ);
+                // The lighting completion queues the centre and all AO
+                // neighbours. Avoid uploading an unlit mesh that would be
+                // discarded immediately after the relight pass.
+            }
+
+            integratedAnything = true;
+        }
+
+        ChunkMeshData meshData;
+
+        {
+            std::scoped_lock lock(meshMutex_);
+
+            if (!meshResults_.empty())
+            {
+                meshData = std::move(meshResults_.front());
+                meshResults_.pop_front();
+            }
+        }
+
+        if (meshData.version != 0)
+        {
+            const auto uploadStart = Clock::now();
+            const ChunkKey key = makeKey(meshData.chunkX, meshData.chunkZ);
+
+            std::uint64_t latestVersion = 0;
+            bool highPriority = false;
+
+            {
+                std::scoped_lock lock(meshMutex_);
+                meshInFlight_.erase(key);
+
+                if (const auto version = meshVersions_.find(key);
+                    version != meshVersions_.end())
+                {
+                    latestVersion = version->second;
+                }
+
+                highPriority =
+                    highPriorityMeshKeys_.erase(key) != 0;
+            }
+
+            const bool chunkStillLoaded =
+                chunkManager_.hasChunk(meshData.chunkX, meshData.chunkZ);
+            const int completedChunkX = meshData.chunkX;
+            const int completedChunkZ = meshData.chunkZ;
+            const std::uint64_t completedVersion = meshData.version;
+            const std::uint64_t uploadedVersion =
+                uploadedMeshVersions_.contains(key)
+                    ? uploadedMeshVersions_.at(key)
+                    : 0;
+
+            // A fluid can change again while its previous snapshot is being
+            // built. Upload every monotonically newer result, even if another
+            // rebuild is already needed, so water never disappears while a
+            // continuously changing chunk waits for its final mesh.
+            if (chunkStillLoaded && completedVersion > uploadedVersion)
+            {
+                meshMilliseconds_ = meshData.cpuBuildMilliseconds;
+
+                if (auto existing = chunkMeshes_.find(key);
+                    existing != chunkMeshes_.end())
+                {
+                    const int oldFaces = existing->second->getVisibleFaceCount();
+                    const int oldVertices = existing->second->getVertexCount();
+                    existing->second->upload(std::move(meshData));
+                    visibleFaceCount_ +=
+                        existing->second->getVisibleFaceCount() - oldFaces;
+                    vertexCount_ +=
+                        existing->second->getVertexCount() - oldVertices;
+                }
+                else
+                {
+                    auto mesh = std::make_unique<ChunkMesh>(std::move(meshData));
+                    visibleFaceCount_ += mesh->getVisibleFaceCount();
+                    vertexCount_ += mesh->getVertexCount();
+                    chunkMeshes_.emplace(
+                        key,
+                        std::move(mesh)
+                    );
+                }
+                uploadedMeshVersions_[key] = completedVersion;
+            }
+
+            if (chunkStillLoaded && completedVersion < latestVersion)
+            {
+                queueChunkMesh(
+                    completedChunkX,
+                    completedChunkZ,
+                    highPriority
+                );
+            }
+
+            uploadMilliseconds_ += elapsedMilliseconds(uploadStart);
+            integratedAnything = true;
+        }
+
+        if (!integratedAnything)
+        {
+            break;
+        }
+    }
+
+}
+
+void World::removeDistantChunks()
+{
+    std::vector<ChunkCoord> chunksToRemove;
+
+    for (const Chunk* chunk : chunkManager_.getChunks())
+    {
+        if (chunk == nullptr)
+        {
+            continue;
+        }
+
+        const int deltaX = std::abs(chunk->getChunkX() - cameraChunkX_);
+        const int deltaZ = std::abs(chunk->getChunkZ() - cameraChunkZ_);
+
+        if (deltaX > unloadDistance_ || deltaZ > unloadDistance_)
+        {
+            chunksToRemove.push_back({
+                chunk->getChunkX(),
+                chunk->getChunkZ()
+            });
+        }
+    }
+
+    for (const ChunkCoord& coordinate : chunksToRemove)
+    {
+        const ChunkKey key = makeKey(coordinate.x, coordinate.z);
+
+        if (modifiedChunks_.contains(key))
+        {
+            if (const Chunk* chunk = chunkManager_.getChunk(
+                    coordinate.x, coordinate.z))
+            {
+                persistedChunkSnapshots_.insert_or_assign(
+                    key, chunk->snapshot()
+                );
+            }
+        }
+
+        chunkManager_.removeChunk(coordinate.x, coordinate.z);
+        if (const auto mesh = chunkMeshes_.find(key);
+            mesh != chunkMeshes_.end())
+        {
+            visibleFaceCount_ -= mesh->second->getVisibleFaceCount();
+            vertexCount_ -= mesh->second->getVertexCount();
+            chunkMeshes_.erase(mesh);
+        }
+        meshVersions_.erase(key);
+        uploadedMeshVersions_.erase(key);
+        highPriorityMeshKeys_.erase(key);
+        initialMeshPending_.erase(key);
+
+        queueChunkMesh(coordinate.x - 1, coordinate.z);
+        queueChunkMesh(coordinate.x + 1, coordinate.z);
+        queueChunkMesh(coordinate.x, coordinate.z - 1);
+        queueChunkMesh(coordinate.x, coordinate.z + 1);
+    }
+
+}
+
+void World::storeWorkerException() noexcept
+{
+    {
+        std::scoped_lock lock(workerExceptionMutex_);
+
+        if (!workerException_)
+        {
+            workerException_ = std::current_exception();
+        }
+    }
+
+    stopping_.store(true);
+    generationCv_.notify_all();
+    meshCv_.notify_all();
+}
+
+void World::rethrowWorkerException()
+{
+    std::exception_ptr exception;
+
+    {
+        std::scoped_lock lock(workerExceptionMutex_);
+        exception = workerException_;
+    }
+
+    if (exception)
+    {
+        std::rethrow_exception(exception);
+    }
+}
+
+void World::generationWorker()
+{
+    try
+    {
+        TerrainGenerator terrainGenerator(seed_);
+
+        while (!stopping_.load())
+        {
+        ChunkCoord coordinate;
+
+        {
+            std::unique_lock lock(generationMutex_);
+
+            generationCv_.wait(
+                lock,
+                [this]
+                {
+                    return stopping_.load() || !generationRequests_.empty();
+                }
+            );
+
+            if (stopping_.load())
+            {
+                return;
+            }
+
+            coordinate = generationRequests_.front();
+            generationRequests_.pop_front();
+        }
+
+        auto chunk = std::make_unique<Chunk>(coordinate.x, coordinate.z);
+
+        const auto start = Clock::now();
+        terrainGenerator.generateChunk(*chunk);
+        const double milliseconds = elapsedMilliseconds(start);
+
+        {
+            std::scoped_lock lock(generationMutex_);
+            generationResults_.push_back({
+                std::move(chunk),
+                milliseconds
+            });
+        }
+        }
+    }
+    catch (...)
+    {
+        storeWorkerException();
+    }
+}
+
+void World::meshWorker()
+{
+    try
+    {
+        while (!stopping_.load())
+        {
+            ChunkMeshInput input;
+
+            {
+                std::unique_lock lock(meshMutex_);
+                meshCv_.wait(
+                    lock,
+                    [this]
+                    {
+                        return stopping_.load() ||
+                               !meshRequests_.empty();
+                    }
+                );
+
+                if (stopping_.load())
+                {
+                    return;
+                }
+
+                input = std::move(meshRequests_.front());
+                meshRequests_.pop_front();
+            }
+
+            ChunkMeshData result =
+                ChunkMesh::buildCpu(input, biomeColours_);
+
+            {
+                std::scoped_lock lock(meshMutex_);
+                meshResults_.push_back(std::move(result));
+            }
+        }
+    }
+    catch (...)
+    {
+        storeWorkerException();
+    }
+}
+
+World::ChunkKey World::makeKey(int chunkX, int chunkZ) noexcept
+{
+    const auto x = static_cast<std::uint32_t>(chunkX);
+    const auto z = static_cast<std::uint32_t>(chunkZ);
+
+    return (static_cast<ChunkKey>(x) << 32U) |
+           static_cast<ChunkKey>(z);
+}
+
+int World::worldToChunk(float coordinate, int chunkSize) noexcept
+{
+    return static_cast<int>(
+        std::floor(coordinate / static_cast<float>(chunkSize))
+    );
+}
+
+int World::floorDivide(int value, int divisor) noexcept
+{
+    int quotient = value / divisor;
+    const int remainder = value % divisor;
+
+    if (remainder != 0 && ((remainder < 0) != (divisor < 0)))
+    {
+        --quotient;
+    }
+
+    return quotient;
+}
+
+int World::positiveModulo(int value, int divisor) noexcept
+{
+    const int remainder = value % divisor;
+    return remainder < 0 ? remainder + divisor : remainder;
+}

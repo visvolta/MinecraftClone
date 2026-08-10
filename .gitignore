@@ -1,0 +1,22 @@
+# CMake/build output
+build/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.vcxproj
+*.vcxproj.filters
+*.sln
+
+# Runtime/editor files
+imgui.ini
+.vscode/
+.vs/
+
+# Compiled output
+*.exe
+*.dll
+*.lib
+*.pdb
+*.obj

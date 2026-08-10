@@ -19,15 +19,17 @@ public:
     static constexpr int Depth = Chunk::DEPTH + Border * 2;
     static constexpr std::size_t SampleCount =
         static_cast<std::size_t>(Width * Chunk::HEIGHT * Depth);
+    static constexpr std::size_t ClimateSampleCount =
+        static_cast<std::size_t>(Width * Depth);
 
     int chunkX = 0;
     int chunkZ = 0;
     std::array<mc::content::BlockState, SampleCount> states{};
     std::array<std::uint8_t, SampleCount> skyLight{};
     std::array<std::uint8_t, SampleCount> blockLight{};
-    std::array<float, Chunk::COLUMN_COUNT> temperatures{};
-    std::array<float, Chunk::COLUMN_COUNT> humidities{};
-    std::array<BiomeId, Chunk::COLUMN_COUNT> biomeIds{};
+    std::array<float, ClimateSampleCount> temperatures{};
+    std::array<float, ClimateSampleCount> humidities{};
+    std::array<BiomeId, ClimateSampleCount> biomeIds{};
     std::array<bool, Chunk::SECTION_COUNT> emptySections{};
 
     [[nodiscard]] mc::content::BlockState getBlockState(
@@ -48,6 +50,15 @@ public:
     {
         return static_cast<std::size_t>(
             (x + Border) + Width * ((z + Border) + Depth * y)
+        );
+    }
+
+    [[nodiscard]] static constexpr std::size_t climateIndex(
+        int x,
+        int z) noexcept
+    {
+        return static_cast<std::size_t>(
+            (x + Border) + Width * (z + Border)
         );
     }
 };

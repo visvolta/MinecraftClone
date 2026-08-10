@@ -66,9 +66,11 @@ float CameraEffects::getFieldOfView(
     float partialTick)
 {
     partialTick = std::clamp(partialTick, 0.0f, 1.0f);
-    float fieldOfView = player.isHeadUnderwater()
-        ? 60.0f
-        : normalFieldOfView;
+    float fieldOfView = normalFieldOfView;
+    if (player.isSprinting())
+        fieldOfView *= 1.1f;
+    if (player.isHeadUnderwater())
+        fieldOfView *= 60.0f / 70.0f;
 
     if (!player.isAlive())
     {

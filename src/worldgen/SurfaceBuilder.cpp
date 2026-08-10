@@ -3,6 +3,8 @@
 #include "Chunk.h"
 #include "worldgen/JavaRandom.h"
 
+#include <algorithm>
+
 void SurfaceBuilder::replaceColumn(
     Chunk& chunk,
     int localX,
@@ -13,15 +15,8 @@ void SurfaceBuilder::replaceColumn(
     double stoneNoise,
     JavaRandom& random) const
 {
-    const bool useSand =
-        sandNoise +
-            random.nextDouble() * 0.2 >
-        0.0;
-
-    const bool useGravel =
-        gravelNoise +
-            random.nextDouble() * 0.2 >
-        3.0;
+    (void)sandNoise;
+    (void)gravelNoise;
 
     const int surfaceDepth =
         static_cast<int>(
@@ -82,35 +77,32 @@ void SurfaceBuilder::replaceColumn(
                 fillerBlock =
                     biomeFillerBlock(climate.biome);
 
-                if (useGravel)
-                {
-                    topBlock = BlockType::Air;
-                    fillerBlock = BlockType::Gravel;
-                }
-
-                if (useSand)
-                {
-                    topBlock = BlockType::Sand;
-                    fillerBlock = BlockType::Sand;
-                }
             }
 
             if (y < SEA_LEVEL &&
                 topBlock == BlockType::Air)
             {
-                topBlock = BlockType::Water;
+                topBlock = climate.temperature < 0.15
+                    ? BlockType::Ice
+                    : BlockType::Water;
             }
 
             remainingDepth = surfaceDepth;
 
-            chunk.setBlock(
-                localX,
-                y,
-                localZ,
-                y >= SEA_LEVEL - 1
-                    ? topBlock
-                    : fillerBlock
-            );
+            if (y >= SEA_LEVEL - 1)
+            {
+                chunk.setBlock(localX, y, localZ, topBlock);
+            }
+            else if (y < SEA_LEVEL - 7 - surfaceDepth)
+            {
+                topBlock = BlockType::Air;
+                fillerBlock = BlockType::Stone;
+                chunk.setBlock(localX, y, localZ, BlockType::Gravel);
+            }
+            else
+            {
+                chunk.setBlock(localX, y, localZ, fillerBlock);
+            }
         }
         else if (remainingDepth > 0)
         {
@@ -124,9 +116,10 @@ void SurfaceBuilder::replaceColumn(
             );
 
             if (remainingDepth == 0 &&
-                fillerBlock == BlockType::Sand)
+                fillerBlock == BlockType::Sand &&
+                surfaceDepth > 1)
             {
-                remainingDepth = random.nextInt(4);
+                remainingDepth = random.nextInt(4) + std::max(0, y - SEA_LEVEL);
                 fillerBlock = BlockType::Sandstone;
             }
         }

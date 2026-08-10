@@ -1,5 +1,8 @@
 #include "BiomeColorMap.h"
 
+#include "worldgen/BetaSimplexNoise.h"
+#include "worldgen/JavaRandom.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -22,6 +25,24 @@ glm::vec3 packedColor(std::uint32_t color) noexcept
         byteToFloat(static_cast<std::uint8_t>(color & 0xFFU))
     };
 }
+
+double swampGrassNoise(int worldX, int worldZ)
+{
+    static JavaRandom random(2345LL);
+    static const BetaSimplexNoise noise(random);
+    std::vector<double> value;
+    noise.add(
+        value,
+        static_cast<double>(worldX),
+        static_cast<double>(worldZ),
+        1,
+        1,
+        0.0225,
+        0.0225,
+        1.0
+    );
+    return value.empty() ? 0.0 : value.front();
+}
 }
 
 BiomeColorMap::BiomeColorMap(
@@ -35,8 +56,19 @@ BiomeColorMap::BiomeColorMap(
 glm::vec3 BiomeColorMap::getGrassColor(
     float temperature,
     float humidity,
-    BiomeId biome) const noexcept
+    BiomeId biome,
+    int worldX,
+    int worldZ) const noexcept
 {
+    if (biome == VanillaBiomes::Swampland ||
+        biome == VanillaBiomes::SwamplandMountains)
+    {
+        return packedColor(
+            swampGrassNoise(worldX, worldZ) < -0.1
+                ? 0x4C763CU
+                : 0x6A7039U
+        );
+    }
     if (const BiomeDefinition* definition = BiomeRegistry::active().find(biome);
         definition != nullptr && definition->grassColor)
         return packedColor(*definition->grassColor);
@@ -46,7 +78,9 @@ glm::vec3 BiomeColorMap::getGrassColor(
 glm::vec3 BiomeColorMap::getFoliageColor(
     float temperature,
     float humidity,
-    BiomeId biome) const noexcept
+    BiomeId biome,
+    int,
+    int) const noexcept
 {
     if (const BiomeDefinition* definition = BiomeRegistry::active().find(biome);
         definition != nullptr && definition->foliageColor)

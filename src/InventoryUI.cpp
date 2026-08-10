@@ -54,10 +54,6 @@ namespace
         {{0b111, 0b101, 0b111, 0b001, 0b111}}
     }};
 
-    constexpr int SOURCE_ICON_SIZE = 16;
-    constexpr int GUI_PIXEL_SCALE = 3;
-    constexpr int ICON_SIZE_PIXELS =
-        SOURCE_ICON_SIZE * GUI_PIXEL_SCALE;
 }
 
 float InventoryUI::FramebufferMapping::logicalX(
@@ -207,6 +203,18 @@ InventoryUI::FramebufferMapping InventoryUI::makeMapping(
     FramebufferMapping mapping;
     mapping.widthPixels = std::max(framebufferWidth, 1);
     mapping.heightPixels = std::max(framebufferHeight, 1);
+
+    // ScaledResolution in 1.12 chooses the largest integral scale that keeps
+    // the logical GUI at least 320x240. This prevents a fixed 3x HUD from
+    // overlapping in short or resized windows.
+    UI_PIXEL_SCALE = 1;
+    while (UI_PIXEL_SCALE < 1000 &&
+           mapping.widthPixels / (UI_PIXEL_SCALE + 1) >= 320 &&
+           mapping.heightPixels / (UI_PIXEL_SCALE + 1) >= 240)
+    {
+        ++UI_PIXEL_SCALE;
+    }
+    ICON_SIZE_PIXELS = 16 * UI_PIXEL_SCALE;
 
     // Use the framebuffer dimensions passed by main.cpp as the physical source
     // of truth. The inventory and hotbar are drawn in framebuffer pixels and
@@ -456,7 +464,7 @@ void InventoryUI::drawStackCount(
     constexpr int glyphWidth = 3;
     constexpr int glyphHeight = 5;
     constexpr int glyphSpacing = 1;
-    constexpr int pixelSize = UI_PIXEL_SCALE;
+    const int pixelSize = UI_PIXEL_SCALE;
 
     const int textWidth =
         static_cast<int>(text.size()) *
@@ -637,7 +645,7 @@ void InventoryUI::drawHotbar(
 {
     constexpr int sourceWidth = 182;
     constexpr int sourceHeight = 22;
-    constexpr int bottomMarginSourcePixels = 24;
+    constexpr int bottomMarginSourcePixels = 22;
 
     const int widthPixels = sourceWidth * UI_PIXEL_SCALE;
     const int heightPixels = sourceHeight * UI_PIXEL_SCALE;

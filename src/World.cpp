@@ -1209,16 +1209,37 @@ ChunkMeshInput World::createMeshInput(
     for (int section = 0; section < Chunk::SECTION_COUNT; ++section)
         snapshot.emptySections[static_cast<std::size_t>(section)] =
             center->isSectionEmpty(section);
-    for (int z = 0; z < Chunk::DEPTH; ++z)
+    for (int z = -ChunkMeshSnapshot::Border;
+         z < Chunk::DEPTH + ChunkMeshSnapshot::Border; ++z)
     {
-        for (int x = 0; x < Chunk::WIDTH; ++x)
+        const int offsetZ = z < 0 ? -1 : (z >= Chunk::DEPTH ? 1 : 0);
+        const int localZ = z < 0 ? z + Chunk::DEPTH
+            : (z >= Chunk::DEPTH ? z - Chunk::DEPTH : z);
+        for (int x = -ChunkMeshSnapshot::Border;
+             x < Chunk::WIDTH + ChunkMeshSnapshot::Border; ++x)
         {
-            const std::size_t column = static_cast<std::size_t>(
-                x + Chunk::WIDTH * z
-            );
-            snapshot.temperatures[column] = center->getTemperature(x, z);
-            snapshot.humidities[column] = center->getHumidity(x, z);
-            snapshot.biomeIds[column] = center->getBiome(x, z);
+            const int offsetX = x < 0 ? -1 : (x >= Chunk::WIDTH ? 1 : 0);
+            const int localX = x < 0 ? x + Chunk::WIDTH
+                : (x >= Chunk::WIDTH ? x - Chunk::WIDTH : x);
+            const Chunk* source = neighbourhood[offsetZ + 1][offsetX + 1];
+            const std::size_t column = ChunkMeshSnapshot::climateIndex(x, z);
+            if (source != nullptr)
+            {
+                snapshot.temperatures[column] =
+                    source->getTemperature(localX, localZ);
+                snapshot.humidities[column] =
+                    source->getHumidity(localX, localZ);
+                snapshot.biomeIds[column] = source->getBiome(localX, localZ);
+            }
+            else
+            {
+                const int edgeX = std::clamp(x, 0, Chunk::WIDTH - 1);
+                const int edgeZ = std::clamp(z, 0, Chunk::DEPTH - 1);
+                snapshot.temperatures[column] =
+                    center->getTemperature(edgeX, edgeZ);
+                snapshot.humidities[column] = center->getHumidity(edgeX, edgeZ);
+                snapshot.biomeIds[column] = center->getBiome(edgeX, edgeZ);
+            }
         }
     }
 

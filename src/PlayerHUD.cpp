@@ -68,6 +68,13 @@ PlayerHUD::FramebufferMapping PlayerHUD::makeMapping(
     FramebufferMapping mapping;
     mapping.widthPixels = std::max(framebufferWidth, 1);
     mapping.heightPixels = std::max(framebufferHeight, 1);
+    UI_PIXEL_SCALE = 1;
+    while (UI_PIXEL_SCALE < 1000 &&
+           mapping.widthPixels / (UI_PIXEL_SCALE + 1) >= 320 &&
+           mapping.heightPixels / (UI_PIXEL_SCALE + 1) >= 240)
+    {
+        ++UI_PIXEL_SCALE;
+    }
     mapping.logicalToPhysicalX =
         displaySize.x > 0.0f
             ? static_cast<float>(mapping.widthPixels) / displaySize.x
@@ -121,7 +128,7 @@ void PlayerHUD::drawFood(
 {
     const int food = player.survival().foodLevel();
     const int originX = mapping.widthPixels / 2 + 91 * UI_PIXEL_SCALE;
-    const int baseY = mapping.heightPixels - 32 * UI_PIXEL_SCALE;
+    const int baseY = mapping.heightPixels - 39 * UI_PIXEL_SCALE;
     std::minstd_rand random(
         static_cast<std::uint32_t>(player.getTicksExisted()) * 312871U + 7U
     );
@@ -153,7 +160,7 @@ void PlayerHUD::drawArmor(
         return;
 
     const int originX = mapping.widthPixels / 2 - 91 * UI_PIXEL_SCALE;
-    const int y = mapping.heightPixels - 42 * UI_PIXEL_SCALE;
+    const int y = mapping.heightPixels - 49 * UI_PIXEL_SCALE;
     for (int icon = 0; icon < 10; ++icon)
     {
         const int x = originX + icon * 8 * UI_PIXEL_SCALE;
@@ -267,9 +274,9 @@ void PlayerHUD::drawHealth(
         flashing = false;
 
     const int originX =
-        mapping.widthPixels / 2 + 91 * UI_PIXEL_SCALE;
+        mapping.widthPixels / 2 - 91 * UI_PIXEL_SCALE;
     const int baseY =
-        mapping.heightPixels - 32 * UI_PIXEL_SCALE;
+        mapping.heightPixels - 39 * UI_PIXEL_SCALE;
 
     std::minstd_rand random(
         static_cast<std::uint32_t>(player.getTicksExisted()) * 312871U
@@ -317,9 +324,9 @@ void PlayerHUD::drawAir(
     const int bubbleCount = std::clamp(visibleBubbles, 0, 10);
 
     const int originX =
-        mapping.widthPixels / 2 - 91 * UI_PIXEL_SCALE;
+        mapping.widthPixels / 2 + 91 * UI_PIXEL_SCALE;
     const int y =
-        mapping.heightPixels - 41 * UI_PIXEL_SCALE;
+        mapping.heightPixels - 49 * UI_PIXEL_SCALE;
 
     for (int bubble = 0; bubble < bubbleCount; ++bubble)
     {

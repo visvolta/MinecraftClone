@@ -54,6 +54,8 @@ public:
     [[nodiscard]] bool isInLava() const noexcept;
     [[nodiscard]] bool isHeadUnderwater() const noexcept;
     [[nodiscard]] bool isBurning() const noexcept;
+    [[nodiscard]] bool isSprinting() const noexcept;
+    [[nodiscard]] bool isCrouching() const noexcept;
     [[nodiscard]] const mc::gameplay::SurvivalStats& survival() const noexcept;
     [[nodiscard]] mc::gameplay::SurvivalStats& survival() noexcept;
     void eat(int food, float saturationModifier) noexcept;
@@ -74,7 +76,9 @@ private:
     // with the camera/eyes 1.62 blocks above the feet.
     static constexpr float WIDTH = 0.6f;
     static constexpr float HEIGHT = 1.8f;
+    static constexpr float CROUCH_HEIGHT = 1.65f;
     static constexpr float EYE_HEIGHT = 1.62f;
+    static constexpr float CROUCH_EYE_HEIGHT = 1.54f;
     static constexpr float HALF_WIDTH = WIDTH * 0.5f;
 
     static constexpr float WALK_SPEED = 4.317f; // blocks per second
@@ -130,6 +134,10 @@ private:
     bool inLava_ = false;
     bool headUnderwater_ = false;
     bool sprinting_ = false;
+    bool crouching_ = false;
+    bool forwardKeyWasDown_ = false;
+    bool collidedHorizontally_ = false;
+    int sprintToggleTicks_ = 0;
     bool blocking_ = false;
     glm::vec3 lookDirection_{0.0f, 0.0f, 1.0f};
     mc::gameplay::SurvivalStats survival_;
@@ -154,6 +162,17 @@ private:
     void moveAndCollide(const glm::vec3& displacement, const World& world);
     float moveAxis(float amount, int axis, const World& world);
     [[nodiscard]] bool collidesAt(const glm::vec3& position, const World& world) const;
+    [[nodiscard]] bool collidesAtHeight(
+        const glm::vec3& position,
+        float height,
+        const World& world
+    ) const;
+    [[nodiscard]] glm::vec2 clampCrouchingMovement(
+        glm::vec2 displacement,
+        const World& world
+    ) const;
+    [[nodiscard]] float currentHeight() const noexcept;
+    [[nodiscard]] float currentEyeHeight() const noexcept;
     [[nodiscard]] bool intersectsLiquidAt(
         const glm::vec3& position,
         const World& world,

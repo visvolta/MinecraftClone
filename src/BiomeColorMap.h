@@ -19,13 +19,17 @@ public:
     [[nodiscard]] glm::vec3 getGrassColor(
         float temperature,
         float humidity,
-        BiomeId biome = VanillaBiomes::Plains
+        BiomeId biome = VanillaBiomes::Plains,
+        int worldX = 0,
+        int worldZ = 0
     ) const noexcept;
 
     [[nodiscard]] glm::vec3 getFoliageColor(
         float temperature,
         float humidity,
-        BiomeId biome = VanillaBiomes::Plains
+        BiomeId biome = VanillaBiomes::Plains,
+        int worldX = 0,
+        int worldZ = 0
     ) const noexcept;
 
 private:

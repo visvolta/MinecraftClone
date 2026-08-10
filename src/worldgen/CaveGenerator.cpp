@@ -2,6 +2,7 @@
 
 #include "Block.h"
 #include "Chunk.h"
+#include "worldgen/Biome.h"
 #include "worldgen/JavaRandom.h"
 
 #include <algorithm>
@@ -88,11 +89,11 @@ void CaveGenerator::recursiveGenerate(
     int caveCount =
         random.nextInt(
             random.nextInt(
-                random.nextInt(40) + 1
+                random.nextInt(15) + 1
             ) + 1
         );
 
-    if (random.nextInt(15) != 0)
+    if (random.nextInt(7) != 0)
     {
         caveCount = 0;
     }
@@ -145,9 +146,15 @@ void CaveGenerator::recursiveGenerate(
                 2.0f /
                 8.0f;
 
-            const float radius =
+            float radius =
                 random.nextFloat() * 2.0f +
                 random.nextFloat();
+
+            if (random.nextInt(10) == 0)
+            {
+                radius *= random.nextFloat() * random.nextFloat() * 3.0f +
+                    1.0f;
+            }
 
             generateCaveNode(
                 random,
@@ -391,7 +398,7 @@ void CaveGenerator::generateCaveNode(
         minX = std::max(minX, 0);
         maxX = std::min(maxX, Chunk::WIDTH);
         minY = std::max(minY, 1);
-        maxY = std::min(maxY, 120);
+        maxY = std::min(maxY, 248);
         minZ = std::max(minZ, 0);
         maxZ = std::min(maxZ, Chunk::DEPTH);
 
@@ -478,22 +485,32 @@ void CaveGenerator::generateCaveNode(
                     const BlockType current =
                         targetChunk.getBlock(x, y, z);
 
-                    if (current == BlockType::Grass)
+                    if (current == BlockType::Grass ||
+                        current == BlockType::Mycelium)
                     {
                         exposedGrass = true;
                     }
 
+                    const BlockType above = y + 1 < Chunk::HEIGHT
+                        ? targetChunk.getBlock(x, y + 1, z)
+                        : BlockType::Air;
+                    const bool looseSurface =
+                        (current == BlockType::Sand ||
+                         current == BlockType::Gravel) &&
+                        above != BlockType::Water;
                     if (current == BlockType::Stone ||
                         current == BlockType::Dirt ||
-                        current == BlockType::Grass)
+                        current == BlockType::Grass ||
+                        current == BlockType::Sandstone ||
+                        current == BlockType::Mycelium ||
+                        current == BlockType::Snow ||
+                        looseSurface)
                     {
-                        // Beta fills y < 10 with lava. Lava is not in the
-                        // current atlas, so these cavities remain air.
                         targetChunk.setBlock(
                             x,
                             y,
                             z,
-                            BlockType::Air
+                            y < 10 ? BlockType::Lava : BlockType::Air
                         );
 
                         if (exposedGrass &&
@@ -501,11 +518,17 @@ void CaveGenerator::generateCaveNode(
                             targetChunk.getBlock(x, y - 1, z) ==
                                 BlockType::Dirt)
                         {
+                            const BiomeDefinition* biome =
+                                BiomeRegistry::active().find(
+                                    targetChunk.getBiome(x, z)
+                                );
                             targetChunk.setBlock(
                                 x,
                                 y - 1,
                                 z,
-                                BlockType::Grass
+                                biome == nullptr
+                                    ? BlockType::Grass
+                                    : biome->topBlock
                             );
                         }
                     }

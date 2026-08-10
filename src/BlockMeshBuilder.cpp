@@ -228,20 +228,77 @@ glm::vec3 tintFor(
     float temperature,
     float humidity,
     BiomeId biome,
+    int worldX,
+    int worldZ,
     const BiomeColorMap& map)
 {
     if (block == BlockType::Grass && face == BlockFace::Top)
-        return map.getGrassColor(temperature, humidity, biome);
+        return map.getGrassColor(
+            temperature, humidity, biome, worldX, worldZ
+        );
     if (block == BlockType::TallGrass)
-        return map.getGrassColor(temperature, humidity, biome);
+        return map.getGrassColor(
+            temperature, humidity, biome, worldX, worldZ
+        );
     if (isLeaf(block) && block != BlockType::SpruceLeaves &&
         block != BlockType::BirchLeaves)
-        return map.getFoliageColor(temperature, humidity, biome);
+        return map.getFoliageColor(
+            temperature, humidity, biome, worldX, worldZ
+        );
     if (block == BlockType::SpruceLeaves)
         return {0x61 / 255.0f, 0x99 / 255.0f, 0x61 / 255.0f};
     if (block == BlockType::BirchLeaves)
         return {0x80 / 255.0f, 0xA7 / 255.0f, 0x55 / 255.0f};
     return {1.0f, 1.0f, 1.0f};
+}
+
+glm::vec3 blendedTintFor(
+    BlockType block,
+    BlockFace face,
+    const ChunkMeshInput& input,
+    int x,
+    int z,
+    const BiomeColorMap& map)
+{
+    const bool biomeTinted =
+        (block == BlockType::Grass && face == BlockFace::Top) ||
+        block == BlockType::TallGrass ||
+        (isLeaf(block) && block != BlockType::SpruceLeaves &&
+         block != BlockType::BirchLeaves);
+    if (!biomeTinted)
+    {
+        return tintFor(
+            block,
+            face,
+            input.snapshot->getTemperature(x, z),
+            input.snapshot->getHumidity(x, z),
+            input.snapshot->getBiome(x, z),
+            input.snapshot->getWorldOriginX() + x,
+            input.snapshot->getWorldOriginZ() + z,
+            map
+        );
+    }
+
+    glm::vec3 colour(0.0f);
+    for (int offsetX = -1; offsetX <= 1; ++offsetX)
+    {
+        for (int offsetZ = -1; offsetZ <= 1; ++offsetZ)
+        {
+            const int sampleX = x + offsetX;
+            const int sampleZ = z + offsetZ;
+            colour += tintFor(
+                block,
+                face,
+                input.snapshot->getTemperature(sampleX, sampleZ),
+                input.snapshot->getHumidity(sampleX, sampleZ),
+                input.snapshot->getBiome(sampleX, sampleZ),
+                input.snapshot->getWorldOriginX() + sampleX,
+                input.snapshot->getWorldOriginZ() + sampleZ,
+                map
+            );
+        }
+    }
+    return colour / 9.0f;
 }
 
 void appendFace(
@@ -333,9 +390,6 @@ int appendBoxes(
         indices = &output.cutoutIndices;
     }
 
-    const float temperature = input.snapshot->getTemperature(x, z);
-    const float humidity = input.snapshot->getHumidity(x, z);
-    const BiomeId biome = input.snapshot->getBiome(x, z);
     const glm::vec3 worldMinimum(
         static_cast<float>(input.snapshot->getWorldOriginX() + x),
         static_cast<float>(y),
@@ -388,14 +442,19 @@ int appendBoxes(
                 {
                     overlayUv = cropUv(*registryOverlay, face.face, box);
                     overlay = &overlayUv;
-                    overlayTint = colourMap.getGrassColor(
-                        temperature, humidity, biome
+                    overlayTint = blendedTintFor(
+                        BlockType::Grass,
+                        BlockFace::Top,
+                        input,
+                        x,
+                        z,
+                        colourMap
                     );
                 }
             }
 
-            const glm::vec3 tint = tintFor(
-                block, face.face, temperature, humidity, biome, colourMap
+            const glm::vec3 tint = blendedTintFor(
+                block, face.face, input, x, z, colourMap
             );
             const auto appendTo = [&](
                 std::vector<ChunkVertex>& targetVertices,
@@ -471,13 +530,8 @@ int appendCrossedPlanes(
     const float brightness = ChunkMeshing::classicBrightness(
         ChunkMeshing::sampleLight(input, x, y, z)
     );
-    const glm::vec3 tint = tintFor(
-        block,
-        BlockFace::Front,
-        input.snapshot->getTemperature(x, z),
-        input.snapshot->getHumidity(x, z),
-        input.snapshot->getBiome(x, z),
-        colourMap
+    const glm::vec3 tint = blendedTintFor(
+        block, BlockFace::Front, input, x, z, colourMap
     );
     const glm::vec3 origin(
         static_cast<float>(input.snapshot->getWorldOriginX() + x) + 0.5f,

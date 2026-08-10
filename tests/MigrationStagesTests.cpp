@@ -4,6 +4,7 @@
 #include "game/GameBootstrap.h"
 #include "gameplay/SurvivalStats.h"
 #include "worldgen/Biome.h"
+#include "worldgen/BiomeMap.h"
 
 #include <cassert>
 #include <filesystem>
@@ -25,7 +26,27 @@ int main()
     const BiomeRegistry& vanilla = BiomeRegistry::vanilla();
     assert(vanilla.find(VanillaBiomes::Jungle)->treeFeature == TreeFeature::Jungle);
     assert(vanilla.find(VanillaBiomes::Savanna)->treeFeature == TreeFeature::Savanna);
+    assert(vanilla.find(VanillaBiomes::Swampland)->treeFeature == TreeFeature::Swamp);
+    assert(vanilla.find(VanillaBiomes::ExtremeHills)->treeFeature == TreeFeature::Hills);
+    assert(vanilla.find(VanillaBiomes::RoofedForest)->roofedForestDecoration);
+    assert(vanilla.find(VanillaBiomes::Desert)->generationWeights[0] == 3);
+    assert(vanilla.find(VanillaBiomes::Savanna)->generationWeights[0] == 2);
+    assert(vanilla.find(VanillaBiomes::Plains)->generationWeights[0] == 1);
+    assert(vanilla.find(VanillaBiomes::Forest)->generationWeights[1] == 1);
+    assert(vanilla.find(VanillaBiomes::ColdTaiga)->generationWeights[3] == 1);
+    assert(vanilla.find(VanillaBiomes::IcePlains)->generationWeights[3] == 3);
     assert(vanilla.find(VanillaBiomes::MesaBryce)->mutationOf == VanillaBiomes::Mesa);
+
+    const BiomeMap biomeMap(123456789);
+    const auto firstSamples = biomeMap.sampleArea(-32, 48, 16, 16);
+    const auto secondSamples = biomeMap.sampleArea(-32, 48, 16, 16);
+    assert(firstSamples.size() == 256U);
+    assert(secondSamples.size() == firstSamples.size());
+    for (std::size_t index = 0; index < firstSamples.size(); ++index)
+    {
+        assert(firstSamples[index].biome == secondSamples[index].biome);
+        assert(vanilla.find(firstSamples[index].biome) != nullptr);
+    }
     BiomeRegistry custom = BiomeRegistry::mutableVanilla();
     const BiomeId customId = custom.nextCustomId();
     assert(customId >= 256);

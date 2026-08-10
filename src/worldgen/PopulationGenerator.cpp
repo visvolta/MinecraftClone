@@ -143,26 +143,51 @@ void PopulationGenerator::populate(
 
             const BiomeDefinition* biomeDefinition =
                 BiomeRegistry::active().find(climate.biome);
-            int treeCount = biomeDefinition == nullptr
-                ? 0
-                : biomeDefinition->treesPerChunk;
-            if (treeCount >= 0 && random.nextInt(10) == 0)
-                ++treeCount;
-
-            for (int attempt = 0; attempt < treeCount; ++attempt)
+            if (biomeDefinition != nullptr &&
+                biomeDefinition->roofedForestDecoration)
             {
-                const int treeX = originX + random.nextInt(16) + 8;
-                const int treeZ = originZ + random.nextInt(16) + 8;
-                const int treeY = context.getHeightValue(treeX, treeZ);
+                for (int gridX = 0; gridX < 4; ++gridX)
+                {
+                    for (int gridZ = 0; gridZ < 4; ++gridZ)
+                    {
+                        const int treeX = originX + gridX * 4 + 9 +
+                            random.nextInt(3);
+                        const int treeZ = originZ + gridZ * 4 + 9 +
+                            random.nextInt(3);
+                        trees.generateForBiome(
+                            context,
+                            random,
+                            climate.biome,
+                            treeX,
+                            context.getHeightValue(treeX, treeZ),
+                            treeZ
+                        );
+                    }
+                }
+            }
+            else
+            {
+                int treeCount = biomeDefinition == nullptr
+                    ? 0
+                    : biomeDefinition->treesPerChunk;
+                if (random.nextInt(10) == 0)
+                    ++treeCount;
 
-                trees.generateForBiome(
-                    context,
-                    random,
-                    climate.biome,
-                    treeX,
-                    treeY,
-                    treeZ
-                );
+                for (int attempt = 0; attempt < treeCount; ++attempt)
+                {
+                    const int treeX = originX + random.nextInt(16) + 8;
+                    const int treeZ = originZ + random.nextInt(16) + 8;
+                    const int treeY = context.getHeightValue(treeX, treeZ);
+
+                    trees.generateForBiome(
+                        context,
+                        random,
+                        climate.biome,
+                        treeX,
+                        treeY,
+                        treeZ
+                    );
+                }
             }
 
             const int flowerCount = biomeDefinition == nullptr

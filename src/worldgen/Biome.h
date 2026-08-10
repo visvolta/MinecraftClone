@@ -3,6 +3,7 @@
 #include "Block.h"
 #include "core/ResourceLocation.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -20,7 +21,18 @@ enum class TreeFeature : std::uint8_t
     MegaTaiga,
     Jungle,
     Savanna,
-    RoofedForest
+    RoofedForest,
+    Hills,
+    Swamp
+};
+
+enum class BiomeClimateCategory : std::uint8_t
+{
+    None,
+    Warm,
+    Medium,
+    Cold,
+    Ice
 };
 
 struct BiomeDefinition
@@ -42,7 +54,9 @@ struct BiomeDefinition
     TreeFeature treeFeature = TreeFeature::Oak;
     int treesPerChunk = 0;
     int grassPerChunk = 1;
-    int flowersPerChunk = 0;
+    int flowersPerChunk = 2;
+    bool roofedForestDecoration = false;
+    std::array<int, 4> generationWeights{};
     std::optional<BiomeId> mutationOf;
 };
 
@@ -53,6 +67,7 @@ public:
     void freeze();
 
     [[nodiscard]] const BiomeDefinition* find(BiomeId id) const noexcept;
+    [[nodiscard]] BiomeDefinition* findMutable(BiomeId id) noexcept;
     [[nodiscard]] const BiomeDefinition* find(
         const mc::core::ResourceLocation& name) const noexcept;
     [[nodiscard]] BiomeId nextCustomId() const noexcept;

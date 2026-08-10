@@ -86,17 +86,17 @@ std::uint8_t ChunkMeshSnapshot::getBlockLight(
 
 float ChunkMeshSnapshot::getTemperature(int x, int z) const noexcept
 {
-    return temperatures[static_cast<std::size_t>(x + Chunk::WIDTH * z)];
+    return temperatures[climateIndex(x, z)];
 }
 
 float ChunkMeshSnapshot::getHumidity(int x, int z) const noexcept
 {
-    return humidities[static_cast<std::size_t>(x + Chunk::WIDTH * z)];
+    return humidities[climateIndex(x, z)];
 }
 
 BiomeId ChunkMeshSnapshot::getBiome(int x, int z) const noexcept
 {
-    return biomeIds[static_cast<std::size_t>(x + Chunk::WIDTH * z)];
+    return biomeIds[climateIndex(x, z)];
 }
 
 bool ChunkMeshSnapshot::isSectionEmpty(int section) const noexcept

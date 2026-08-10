@@ -64,7 +64,7 @@ const glm::vec3& Player::getPosition() const
 
 glm::vec3 Player::getEyePosition() const
 {
-    return position_ + glm::vec3(0.0f, EYE_HEIGHT, 0.0f);
+    return position_ + glm::vec3(0.0f, currentEyeHeight(), 0.0f);
 }
 
 glm::vec3 Player::getRenderPosition() const
@@ -74,7 +74,7 @@ glm::vec3 Player::getRenderPosition() const
 
 glm::vec3 Player::getRenderEyePosition() const
 {
-    return renderPosition_ + glm::vec3(0.0f, EYE_HEIGHT, 0.0f);
+    return renderPosition_ + glm::vec3(0.0f, currentEyeHeight(), 0.0f);
 }
 
 bool Player::isGrounded() const
@@ -89,7 +89,7 @@ bool Player::overlapsBlock(
     const BlockBox playerBox{
         {position_.x - HALF_WIDTH, position_.y,
          position_.z - HALF_WIDTH},
-        {position_.x + HALF_WIDTH, position_.y + HEIGHT,
+        {position_.x + HALF_WIDTH, position_.y + currentHeight(),
          position_.z + HALF_WIDTH}
     };
     for (const BlockBox& localBox : getBlockShape(block).collisionBoxes)
@@ -184,6 +184,16 @@ bool Player::isBurning() const noexcept
     return fireTicks_ > 0;
 }
 
+bool Player::isSprinting() const noexcept
+{
+    return sprinting_;
+}
+
+bool Player::isCrouching() const noexcept
+{
+    return crouching_;
+}
+
 const mc::gameplay::SurvivalStats& Player::survival() const noexcept
 {
     return survival_;
@@ -251,6 +261,11 @@ void Player::setNoClip(bool enabled) noexcept
     inWater_ = false;
     inLava_ = false;
     headUnderwater_ = false;
+    sprinting_ = false;
+    crouching_ = false;
+    forwardKeyWasDown_ = false;
+    collidedHorizontally_ = false;
+    sprintToggleTicks_ = 0;
     blocking_ = false;
     previousPosition_ = position_;
     renderPosition_ = position_;
@@ -290,6 +305,10 @@ void Player::respawn(const glm::vec3& feetPosition) noexcept
     inLava_ = false;
     headUnderwater_ = false;
     sprinting_ = false;
+    crouching_ = false;
+    forwardKeyWasDown_ = false;
+    collidedHorizontally_ = false;
+    sprintToggleTicks_ = 0;
     blocking_ = false;
 }
 
@@ -330,6 +349,10 @@ void Player::restorePersistentState(
     inLava_ = false;
     headUnderwater_ = false;
     sprinting_ = false;
+    crouching_ = false;
+    forwardKeyWasDown_ = false;
+    collidedHorizontally_ = false;
+    sprintToggleTicks_ = 0;
     blocking_ = false;
 }
 
@@ -385,27 +408,75 @@ void Player::simulateTick(GLFWwindow* window, const World& world, const Camera& 
         right = glm::normalize(right);
 
     glm::vec3 wishDirection(0.0f);
+    float forwardInput = 0.0f;
+    float strafeInput = 0.0f;
 
     if (isAlive())
     {
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            wishDirection += forward;
+            forwardInput += 1.0f;
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            wishDirection -= forward;
+            forwardInput -= 1.0f;
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            wishDirection += right;
+            strafeInput += 1.0f;
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            wishDirection -= right;
+            strafeInput -= 1.0f;
     }
+
+    const bool crouchKey = isAlive() &&
+        (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+         glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
+    if (crouchKey)
+    {
+        crouching_ = true;
+    }
+    else if (crouching_ &&
+             !collidesAtHeight(position_, HEIGHT, world))
+    {
+        crouching_ = false;
+    }
+
+    if (crouching_)
+    {
+        forwardInput *= 0.3f;
+        strafeInput *= 0.3f;
+    }
+    wishDirection = forward * forwardInput + right * strafeInput;
 
     if (glm::dot(wishDirection, wishDirection) > 1.0f)
         wishDirection = glm::normalize(wishDirection);
 
-    sprinting_ = isAlive() && !inWater_ && !inLava_ &&
-        survival_.foodLevel() > 6 &&
-        (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS) &&
-        glm::dot(wishDirection, wishDirection) > 0.01f;
+    if (sprintToggleTicks_ > 0)
+        --sprintToggleTicks_;
+    const bool forwardKeyDown = forwardInput >= 0.8f;
+    const bool canSprint = isAlive() && !crouching_ &&
+        survival_.foodLevel() > 6;
+    const bool sprintKey =
+        glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+    if (!sprinting_ && canSprint && forwardKeyDown && sprintKey)
+    {
+        sprinting_ = true;
+    }
+    else if (!sprinting_ && canSprint && grounded_ && forwardKeyDown &&
+             !forwardKeyWasDown_)
+    {
+        if (sprintToggleTicks_ > 0)
+        {
+            sprinting_ = true;
+            sprintToggleTicks_ = 0;
+        }
+        else
+        {
+            sprintToggleTicks_ = 7;
+        }
+    }
+    if (sprinting_ &&
+        (!canSprint || !forwardKeyDown || collidedHorizontally_))
+    {
+        sprinting_ = false;
+    }
+    forwardKeyWasDown_ = forwardKeyDown;
 
     const glm::vec3 movementStart = position_;
     if (inWater_)
@@ -472,11 +543,20 @@ void Player::simulateNormalMovement(
 {
     liquidHorizontalVelocity_ = {0.0f, 0.0f};
 
-    const glm::vec3 horizontalDisplacement =
-        wishDirection * WALK_SPEED * speedMultiplier * PHYSICS_STEP;
+    glm::vec2 horizontalDisplacement(
+        wishDirection.x * WALK_SPEED * speedMultiplier * PHYSICS_STEP,
+        wishDirection.z * WALK_SPEED * speedMultiplier * PHYSICS_STEP
+    );
+    if (crouching_ && grounded_)
+        horizontalDisplacement = clampCrouchingMovement(
+            horizontalDisplacement, world
+        );
 
-    moveAxis(horizontalDisplacement.x, 0, world);
-    moveAxis(horizontalDisplacement.z, 2, world);
+    const float movedX = moveAxis(horizontalDisplacement.x, 0, world);
+    const float movedZ = moveAxis(horizontalDisplacement.y, 2, world);
+    collidedHorizontally_ =
+        std::abs(movedX - horizontalDisplacement.x) > COLLISION_EPSILON ||
+        std::abs(movedZ - horizontalDisplacement.y) > COLLISION_EPSILON;
 
     const bool jumpedThisTick = jumpQueued_ && grounded_ && isAlive();
     if (jumpedThisTick)
@@ -558,6 +638,7 @@ void Player::simulateLiquidMovement(
     const bool collidedHorizontally =
         std::abs(movedX - intendedX) > COLLISION_EPSILON ||
         std::abs(movedZ - intendedZ) > COLLISION_EPSILON;
+    collidedHorizontally_ = collidedHorizontally;
 
     grounded_ = false;
     moveAxis(verticalVelocity_, 1, world);
@@ -756,10 +837,18 @@ float Player::moveAxis(float amount, int axis, const World& world)
 
 bool Player::collidesAt(const glm::vec3& position, const World& world) const
 {
+    return collidesAtHeight(position, currentHeight(), world);
+}
+
+bool Player::collidesAtHeight(
+    const glm::vec3& position,
+    float height,
+    const World& world) const
+{
     const float minX = position.x - HALF_WIDTH + COLLISION_EPSILON;
     const float maxX = position.x + HALF_WIDTH - COLLISION_EPSILON;
     const float minY = position.y + COLLISION_EPSILON;
-    const float maxY = position.y + HEIGHT - COLLISION_EPSILON;
+    const float maxY = position.y + height - COLLISION_EPSILON;
     const float minZ = position.z - HALF_WIDTH + COLLISION_EPSILON;
     const float maxZ = position.z + HALF_WIDTH - COLLISION_EPSILON;
 
@@ -798,6 +887,48 @@ bool Player::collidesAt(const glm::vec3& position, const World& world) const
     return false;
 }
 
+glm::vec2 Player::clampCrouchingMovement(
+    glm::vec2 displacement,
+    const World& world) const
+{
+    const auto reduce = [](float value)
+    {
+        constexpr float edgeStep = 0.05f;
+        if (value > -edgeStep && value < edgeStep)
+            return 0.0f;
+        return value > 0.0f ? value - edgeStep : value + edgeStep;
+    };
+    const auto supported = [this, &world](float x, float z)
+    {
+        return collidesAt(
+            position_ + glm::vec3(x, -0.6f, z),
+            world
+        );
+    };
+
+    while (displacement.x != 0.0f && !supported(displacement.x, 0.0f))
+        displacement.x = reduce(displacement.x);
+    while (displacement.y != 0.0f && !supported(0.0f, displacement.y))
+        displacement.y = reduce(displacement.y);
+    while (displacement.x != 0.0f && displacement.y != 0.0f &&
+           !supported(displacement.x, displacement.y))
+    {
+        displacement.x = reduce(displacement.x);
+        displacement.y = reduce(displacement.y);
+    }
+    return displacement;
+}
+
+float Player::currentHeight() const noexcept
+{
+    return crouching_ ? CROUCH_HEIGHT : HEIGHT;
+}
+
+float Player::currentEyeHeight() const noexcept
+{
+    return crouching_ ? CROUCH_EYE_HEIGHT : EYE_HEIGHT;
+}
+
 bool Player::intersectsLiquidAt(
     const glm::vec3& position,
     const World& world,
@@ -810,7 +941,7 @@ bool Player::intersectsLiquidAt(
     const float minX = position.x - liquidHalfWidth + COLLISION_EPSILON;
     const float maxX = position.x + liquidHalfWidth - COLLISION_EPSILON;
     const float minY = position.y - 0.4f + COLLISION_EPSILON;
-    const float maxY = position.y + HEIGHT - COLLISION_EPSILON;
+    const float maxY = position.y + currentHeight() - COLLISION_EPSILON;
     const float minZ = position.z - liquidHalfWidth + COLLISION_EPSILON;
     const float maxZ = position.z + liquidHalfWidth - COLLISION_EPSILON;
 
@@ -872,7 +1003,7 @@ glm::vec3 Player::liquidFlowAt(
     const float minX = position.x - halfWidth + COLLISION_EPSILON;
     const float maxX = position.x + halfWidth - COLLISION_EPSILON;
     const float minY = position.y - 0.4f + COLLISION_EPSILON;
-    const float maxY = position.y + HEIGHT - COLLISION_EPSILON;
+    const float maxY = position.y + currentHeight() - COLLISION_EPSILON;
     const float minZ = position.z - halfWidth + COLLISION_EPSILON;
     const float maxZ = position.z + halfWidth - COLLISION_EPSILON;
 

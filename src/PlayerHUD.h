@@ -20,7 +20,8 @@ public:
     ) const;
 
 private:
-    static constexpr int UI_PIXEL_SCALE = 3;
+    // Selected per frame with the 1.12 ScaledResolution rules.
+    inline static int UI_PIXEL_SCALE = 1;
 
     struct FramebufferMapping
     {

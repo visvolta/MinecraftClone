@@ -28,6 +28,7 @@ public:
         int depth) const;
 
 private:
+    int seed_ = 0;
     JavaRandom temperatureRandom_;
     JavaRandom humidityRandom_;
     JavaRandom detailRandom_;

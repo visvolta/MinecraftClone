@@ -43,7 +43,10 @@ public:
     );
 
 private:
-    static constexpr int UI_PIXEL_SCALE = 3;
+    // Selected per frame with the 1.12 ScaledResolution rules. Rendering is
+    // single-threaded, so the helpers can share the scale selected by draw().
+    inline static int UI_PIXEL_SCALE = 1;
+    inline static int ICON_SIZE_PIXELS = 16;
 
     enum class Screen
     {

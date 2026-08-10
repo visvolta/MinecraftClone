@@ -5,9 +5,12 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
+#include <vector>
 
 namespace
 {
@@ -122,6 +125,7 @@ int main()
     GameSaveData source;
     source.seed = 987654;
     source.worldTime = 12'345;
+    source.spawnPosition = glm::ivec3(84, 71, -36);
     source.player.survival.foodLevel = 13;
     source.player.survival.saturation = 2.5f;
     source.player.survival.experienceLevel = 7;
@@ -164,12 +168,14 @@ int main()
     raw.seekg(8);
     std::uint32_t version = 0;
     raw.read(reinterpret_cast<char*>(&version), sizeof(version));
-    assert(version == 4);
+    assert(version == 5);
+    raw.close();
 
     const auto loaded = SaveGame::load(path, message, bootstrap.content());
     assert(loaded);
     assert(loaded->seed == source.seed);
     assert(loaded->worldTime == source.worldTime);
+    assert(loaded->spawnPosition == source.spawnPosition);
     assert(loaded->player.survival.foodLevel == 13);
     assert(loaded->player.survival.experienceLevel == 7);
     assert(loaded->inventory[Inventory::OFFHAND_SLOT].item == ItemType::Shield);
@@ -189,11 +195,45 @@ int main()
     assert(loadedEntities.getFurnace({2, 61, 3})->getSlot(
         FurnaceBlockEntity::Input).count == 4);
 
+    // Version 4 had all 256-high/survival data but no persisted world spawn.
+    // Removing the three new integers creates a byte-accurate migration case.
+    const std::filesystem::path versionFourPath =
+        std::filesystem::temp_directory_path() /
+        "minecraftclone-version-four-save-test.dat";
+    std::ifstream versionFiveInput(path, std::ios::binary);
+    std::vector<char> versionFourBytes(
+        (std::istreambuf_iterator<char>(versionFiveInput)),
+        std::istreambuf_iterator<char>()
+    );
+    const std::uint32_t versionFour = 4;
+    std::memcpy(versionFourBytes.data() + 8, &versionFour, sizeof(versionFour));
+    constexpr std::size_t spawnOffset = 8 + 4 + 4 + 8;
+    versionFourBytes.erase(
+        versionFourBytes.begin() + static_cast<std::ptrdiff_t>(spawnOffset),
+        versionFourBytes.begin() + static_cast<std::ptrdiff_t>(spawnOffset + 12)
+    );
+    std::ofstream versionFourOutput(versionFourPath, std::ios::binary);
+    versionFourOutput.write(
+        versionFourBytes.data(),
+        static_cast<std::streamsize>(versionFourBytes.size())
+    );
+    versionFourOutput.close();
+    const auto migratedVersionFour = SaveGame::load(
+        versionFourPath, message, bootstrap.content()
+    );
+    assert(migratedVersionFour);
+    assert(!migratedVersionFour->spawnPosition);
+    assert(migratedVersionFour->player.survival.foodLevel == 13);
+    assert(migratedVersionFour->modifiedChunks.front().paletteIndices.size() ==
+           Chunk::BLOCK_COUNT);
+
     const std::filesystem::path legacyPath =
         std::filesystem::temp_directory_path() /
         "minecraftclone-legacy-save-test.dat";
     std::filesystem::remove(legacyPath, ignored);
     std::filesystem::remove(legacyPath.string() + ".bak", ignored);
+    std::filesystem::remove(versionFourPath, ignored);
+    std::filesystem::remove(versionFourPath.string() + ".bak", ignored);
     writeLegacyV1Fixture(legacyPath);
     const auto migrated = SaveGame::load(
         legacyPath,

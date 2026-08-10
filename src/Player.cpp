@@ -194,6 +194,13 @@ bool Player::isCrouching() const noexcept
     return crouching_;
 }
 
+float Player::getFovMultiplier(float partialTick) const noexcept
+{
+    partialTick = std::clamp(partialTick, 0.0f, 1.0f);
+    return previousFovMultiplier_ +
+        (fovMultiplier_ - previousFovMultiplier_) * partialTick;
+}
+
 const mc::gameplay::SurvivalStats& Player::survival() const noexcept
 {
     return survival_;
@@ -267,6 +274,8 @@ void Player::setNoClip(bool enabled) noexcept
     collidedHorizontally_ = false;
     sprintToggleTicks_ = 0;
     blocking_ = false;
+    previousFovMultiplier_ = 1.0f;
+    fovMultiplier_ = 1.0f;
     previousPosition_ = position_;
     renderPosition_ = position_;
 }
@@ -310,6 +319,8 @@ void Player::respawn(const glm::vec3& feetPosition) noexcept
     collidedHorizontally_ = false;
     sprintToggleTicks_ = 0;
     blocking_ = false;
+    previousFovMultiplier_ = 1.0f;
+    fovMultiplier_ = 1.0f;
 }
 
 PlayerPersistentState Player::persistentState() const noexcept
@@ -354,6 +365,8 @@ void Player::restorePersistentState(
     collidedHorizontally_ = false;
     sprintToggleTicks_ = 0;
     blocking_ = false;
+    previousFovMultiplier_ = 1.0f;
+    fovMultiplier_ = 1.0f;
 }
 
 void Player::updateNoClip(
@@ -534,6 +547,35 @@ void Player::simulateTick(GLFWwindow* window, const World& world, const Camera& 
     // Refresh these after movement so rendering and mining use the player's
     // new fixed-tick position rather than the previous tick's liquid state.
     updateEnvironment(world);
+    updateFovMultiplier();
+}
+
+void Player::updateFovMultiplier() noexcept
+{
+    float movementModifier = sprinting_ ? 1.3f : 1.0f;
+    const int speed = survival_.effectAmplifier(
+        mc::gameplay::StatusEffectType::Speed
+    );
+    const int slowness = survival_.effectAmplifier(
+        mc::gameplay::StatusEffectType::Slowness
+    );
+    if (speed >= 0)
+        movementModifier *= 1.0f + 0.2f * static_cast<float>(speed + 1);
+    if (slowness >= 0)
+        movementModifier *= std::max(
+            0.0f, 1.0f - 0.15f * static_cast<float>(slowness + 1)
+        );
+
+    // AbstractClientPlayer#getFovModifier followed by EntityRenderer's 50%
+    // per-tick hand-FOV easing.
+    const float target = std::clamp(
+        (movementModifier + 1.0f) * 0.5f,
+        0.1f,
+        1.5f
+    );
+    previousFovMultiplier_ = fovMultiplier_;
+    fovMultiplier_ += (target - fovMultiplier_) * 0.5f;
+    fovMultiplier_ = std::clamp(fovMultiplier_, 0.1f, 1.5f);
 }
 
 void Player::simulateNormalMovement(

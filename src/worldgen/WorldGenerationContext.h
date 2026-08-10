@@ -11,8 +11,15 @@ class WorldGenerationContext
 {
 public:
     using FallbackSampler = std::function<BlockType(int, int, int)>;
+    using HeightSampler = std::function<int(int, int)>;
+    using ClimateSampler = std::function<ClimateSample(int, int)>;
 
-    WorldGenerationContext(Chunk& targetChunk, FallbackSampler fallbackSampler);
+    WorldGenerationContext(
+        Chunk& targetChunk,
+        FallbackSampler fallbackSampler,
+        HeightSampler heightSampler,
+        ClimateSampler climateSampler
+    );
 
     [[nodiscard]] BlockType getBlock(int worldX, int worldY, int worldZ) const;
     [[nodiscard]] bool isInsideTarget(int worldX, int worldY, int worldZ) const noexcept;
@@ -24,4 +31,6 @@ public:
 private:
     Chunk& targetChunk_;
     FallbackSampler fallbackSampler_;
+    HeightSampler heightSampler_;
+    ClimateSampler climateSampler_;
 };

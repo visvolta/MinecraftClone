@@ -51,8 +51,52 @@ TerrainGenerator::TerrainGenerator(int seed)
 {
 }
 
+TerrainGenerator::~TerrainGenerator() = default;
+
 void TerrainGenerator::generateChunk(
     Chunk& chunk) const
+{
+    const auto cached = terrainCache_.find(terrainCacheKey(
+        chunk.getChunkX(), chunk.getChunkZ()
+    ));
+    if (cached != terrainCache_.end())
+        chunk = *cached->second;
+    else
+        generateTerrainOnly(chunk);
+
+    cacheTerrainChunk(chunk);
+
+    WorldGenerationContext context(
+        chunk,
+        [this](int worldX, int worldY, int worldZ)
+        {
+            const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+            const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+            return terrainChunkAt(chunkX, chunkZ).getBlock(
+                positiveModulo(worldX, Chunk::WIDTH),
+                worldY,
+                positiveModulo(worldZ, Chunk::DEPTH)
+            );
+        },
+        [this](int worldX, int worldZ)
+        {
+            const int chunkX = floorDivide(worldX, Chunk::WIDTH);
+            const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
+            return terrainChunkAt(chunkX, chunkZ).getMotionBlockingHeight(
+                positiveModulo(worldX, Chunk::WIDTH),
+                positiveModulo(worldZ, Chunk::DEPTH)
+            );
+        },
+        [this](int worldX, int worldZ)
+        {
+            return biomeMap_.sample(worldX, worldZ);
+        }
+    );
+
+    populationGenerator_.populate(chunk, context);
+}
+
+void TerrainGenerator::generateTerrainOnly(Chunk& chunk) const
 {
     chunk.clear();
 
@@ -112,27 +156,64 @@ void TerrainGenerator::generateChunk(
     // ChunkGeneratorOverworld carves caves after biome surface replacement.
     caveGenerator_.generate(chunk);
 
-    WorldGenerationContext context(
-        chunk,
-        [this](
-            int worldX,
-            int worldY,
-            int worldZ)
-        {
-            return sampleBaseBlock(
-                worldX,
-                worldY,
-                worldZ
-            );
-        }
-    );
+}
 
-    // Population replays neighbouring source chunks so trees and decorators
-    // remain deterministic across independently generated chunk borders.
-    populationGenerator_.populate(
-        chunk,
-        context
+const Chunk& TerrainGenerator::terrainChunkAt(int chunkX, int chunkZ) const
+{
+    const std::uint64_t key = terrainCacheKey(chunkX, chunkZ);
+    const auto found = terrainCache_.find(key);
+    if (found != terrainCache_.end())
+        return *found->second;
+
+    auto terrain = std::make_unique<Chunk>(chunkX, chunkZ);
+    generateTerrainOnly(*terrain);
+    const Chunk& result = *terrain;
+    terrainCache_.emplace(key, std::move(terrain));
+    terrainCacheOrder_.push_back(key);
+
+    constexpr std::size_t maximumCachedTerrainChunks = 48;
+    while (terrainCacheOrder_.size() > maximumCachedTerrainChunks)
+    {
+        const std::uint64_t oldest = terrainCacheOrder_.front();
+        terrainCacheOrder_.pop_front();
+        if (oldest != key)
+            terrainCache_.erase(oldest);
+    }
+    return result;
+}
+
+void TerrainGenerator::cacheTerrainChunk(const Chunk& chunk) const
+{
+    const std::uint64_t key = terrainCacheKey(
+        chunk.getChunkX(), chunk.getChunkZ()
     );
+    if (terrainCache_.contains(key))
+        return;
+    terrainCache_.emplace(key, std::make_unique<Chunk>(chunk));
+    terrainCacheOrder_.push_back(key);
+}
+
+std::uint64_t TerrainGenerator::terrainCacheKey(
+    int chunkX,
+    int chunkZ) noexcept
+{
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(chunkX)) << 32U) |
+        static_cast<std::uint32_t>(chunkZ);
+}
+
+int TerrainGenerator::floorDivide(int value, int divisor) noexcept
+{
+    int quotient = value / divisor;
+    const int remainder = value % divisor;
+    if (remainder != 0 && ((remainder < 0) != (divisor < 0)))
+        --quotient;
+    return quotient;
+}
+
+int TerrainGenerator::positiveModulo(int value, int divisor) noexcept
+{
+    const int remainder = value % divisor;
+    return remainder < 0 ? remainder + std::abs(divisor) : remainder;
 }
 
 int TerrainGenerator::getSeed() const noexcept
@@ -657,38 +738,6 @@ void TerrainGenerator::initializeNoiseField(
             }
         }
     }
-}
-
-BlockType TerrainGenerator::sampleBaseBlock(
-    int,
-    int worldY,
-    int) const
-{
-    if (worldY < 0 ||
-        worldY >= Chunk::HEIGHT)
-    {
-        return BlockType::Air;
-    }
-
-    if (worldY == 0)
-    {
-        return BlockType::Bedrock;
-    }
-
-    // Used only when validating a feature just outside the target chunk.
-    // This conservative sea-level profile keeps independently generated
-    // border features deterministic without touching live neighbour chunks.
-    if (worldY < SurfaceBuilder::SEA_LEVEL - 4)
-    {
-        return BlockType::Stone;
-    }
-
-    if (worldY < SurfaceBuilder::SEA_LEVEL)
-    {
-        return BlockType::Water;
-    }
-
-    return BlockType::Air;
 }
 
 long long TerrainGenerator::makeChunkSeed(

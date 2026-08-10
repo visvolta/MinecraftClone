@@ -53,6 +53,7 @@ struct BiomeDefinition
     BlockType fillerBlock = BlockType::Dirt;
     TreeFeature treeFeature = TreeFeature::Oak;
     int treesPerChunk = 0;
+    float extraTreeChance = 0.1f;
     int grassPerChunk = 1;
     int flowersPerChunk = 2;
     bool roofedForestDecoration = false;

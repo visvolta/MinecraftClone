@@ -1,3 +1,4 @@
+
 #include "worldgen/BetaNoiseGeneratorPerlin.h"
 
 #include <algorithm>

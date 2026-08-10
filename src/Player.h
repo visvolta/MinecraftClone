@@ -56,6 +56,7 @@ public:
     [[nodiscard]] bool isBurning() const noexcept;
     [[nodiscard]] bool isSprinting() const noexcept;
     [[nodiscard]] bool isCrouching() const noexcept;
+    [[nodiscard]] float getFovMultiplier(float partialTick) const noexcept;
     [[nodiscard]] const mc::gameplay::SurvivalStats& survival() const noexcept;
     [[nodiscard]] mc::gameplay::SurvivalStats& survival() noexcept;
     void eat(int food, float saturationModifier) noexcept;
@@ -139,6 +140,8 @@ private:
     bool collidedHorizontally_ = false;
     int sprintToggleTicks_ = 0;
     bool blocking_ = false;
+    float previousFovMultiplier_ = 1.0f;
+    float fovMultiplier_ = 1.0f;
     glm::vec3 lookDirection_{0.0f, 0.0f, 1.0f};
     mc::gameplay::SurvivalStats survival_;
 
@@ -156,6 +159,7 @@ private:
     );
     void updateEnvironment(const World& world);
     void updateDamageAndAir();
+    void updateFovMultiplier() noexcept;
     void takeDamage(int amount) noexcept;
     void applyFallDamage() noexcept;
     void updateNoClip(GLFWwindow* window, float deltaTime, const Camera& camera);

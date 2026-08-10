@@ -7,9 +7,13 @@
 
 WorldGenerationContext::WorldGenerationContext(
     Chunk& targetChunk,
-    FallbackSampler fallbackSampler)
+    FallbackSampler fallbackSampler,
+    HeightSampler heightSampler,
+    ClimateSampler climateSampler)
     : targetChunk_(targetChunk),
-      fallbackSampler_(std::move(fallbackSampler))
+      fallbackSampler_(std::move(fallbackSampler)),
+      heightSampler_(std::move(heightSampler)),
+      climateSampler_(std::move(climateSampler))
 {
 }
 
@@ -72,6 +76,9 @@ bool WorldGenerationContext::setBlock(
 
 int WorldGenerationContext::getHeightValue(int worldX, int worldZ) const
 {
+    if (heightSampler_)
+        return heightSampler_(worldX, worldZ);
+
     for (int y = Chunk::HEIGHT - 1; y >= 0; --y)
     {
         const BlockType block = getBlock(worldX, y, worldZ);
@@ -86,6 +93,9 @@ ClimateSample WorldGenerationContext::sampleClimate(
     int worldX,
     int worldZ) const
 {
+    if (climateSampler_)
+        return climateSampler_(worldX, worldZ);
+
     if (worldX >= targetChunk_.getWorldOriginX() &&
         worldX < targetChunk_.getWorldOriginX() + Chunk::WIDTH &&
         worldZ >= targetChunk_.getWorldOriginZ() &&

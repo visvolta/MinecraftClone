@@ -97,10 +97,11 @@ private:
         int x, int y, int z
     ) const;
 
-    bool generateMegaSpruce(
+    bool generateMegaPine(
         WorldGenerationContext& context,
         JavaRandom& random,
-        int x, int y, int z
+        int x, int y, int z,
+        bool tallCrown
     ) const;
 
     static bool canReplace(BlockType block) noexcept;

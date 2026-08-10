@@ -69,9 +69,15 @@ bool TreeGenerator::generateForBiome(
                 : generateSpruce(context, random, worldX, worldY, worldZ);
         case TreeFeature::MegaTaiga:
             if (random.nextInt(3) == 0)
-                return generateMegaSpruce(
-                    context, random, worldX, worldY, worldZ
+            {
+                const bool megaSpruce =
+                    biome == VanillaBiomes::MegaSpruceTaiga ||
+                    biome == VanillaBiomes::MegaSpruceTaigaHills ||
+                    random.nextInt(13) == 0;
+                return generateMegaPine(
+                    context, random, worldX, worldY, worldZ, megaSpruce
                 );
+            }
             return random.nextInt(3) == 0
                 ? generatePine(context, random, worldX, worldY, worldZ)
                 : generateSpruce(context, random, worldX, worldY, worldZ);
@@ -118,6 +124,13 @@ bool TreeGenerator::generateForBiome(
         case TreeFeature::Swamp:
             return generateSwamp(context, random, worldX, worldY, worldZ);
         case TreeFeature::Oak:
+            if (biome == VanillaBiomes::Plains ||
+                biome == VanillaBiomes::SunflowerPlains)
+            {
+                return random.nextInt(3) == 0
+                    ? generateBigOak(context, random, worldX, worldY, worldZ)
+                    : generateOak(context, random, worldX, worldY, worldZ);
+            }
             if ((biome == VanillaBiomes::Forest ||
                  biome == VanillaBiomes::ForestHills ||
                  biome == VanillaBiomes::FlowerForest) &&
@@ -602,7 +615,7 @@ bool TreeGenerator::generateMegaJungle(
     int y,
     int z) const
 {
-    const int height = 10 + random.nextInt(20);
+    const int height = 10 + random.nextInt(3) + random.nextInt(20);
     if (y < 1 || y + height + 2 >= Chunk::HEIGHT)
         return false;
     for (int dx = 0; dx < 2; ++dx)
@@ -787,7 +800,7 @@ bool TreeGenerator::generateDarkOak(
     int y,
     int z) const
 {
-    const int height = 6 + random.nextInt(4);
+    const int height = 6 + random.nextInt(3) + random.nextInt(2);
     if (y < 1 || y + height + 2 >= Chunk::HEIGHT)
         return false;
     for (int dx = 0; dx < 2; ++dx)
@@ -818,32 +831,41 @@ bool TreeGenerator::generateDarkOak(
     return true;
 }
 
-bool TreeGenerator::generateMegaSpruce(
+bool TreeGenerator::generateMegaPine(
     WorldGenerationContext& context,
     JavaRandom& random,
     int x,
     int y,
-    int z) const
+    int z,
+    bool tallCrown) const
 {
-    const int height = 13 + random.nextInt(9);
+    const int height = 13 + random.nextInt(3) + random.nextInt(15);
     if (y < 1 || y + height + 2 >= Chunk::HEIGHT)
         return false;
     for (int dx = 0; dx < 2; ++dx)
         for (int dz = 0; dz < 2; ++dz)
             if (!hasValidSoil(context, x + dx, y, z + dz)) return false;
-    for (int dx = 0; dx < 2; ++dx)
-        for (int dz = 0; dz < 2; ++dz)
-            context.setBlock(x + dx, y - 1, z + dz, BlockType::Podzol);
-    const int foliageStart = y + height - 6;
-    for (int yy = foliageStart; yy <= y + height; ++yy)
+    const int crownHeight = random.nextInt(5) + (tallCrown ? 13 : 3);
+    int previousRadius = -1;
+    for (int yy = y + height - crownHeight; yy <= y + height; ++yy)
     {
-        const int radius = std::min(3, 1 + (y + height - yy) / 2);
-        for (int xx = x - radius; xx <= x + 1 + radius; ++xx)
-            for (int zz = z - radius; zz <= z + 1 + radius; ++zz)
-                if ((std::abs(xx - x) < radius + 1 ||
-                     std::abs(zz - z) < radius + 1) &&
+        const int distanceFromTop = y + height - yy;
+        int radius = static_cast<int>(std::floor(
+            static_cast<float>(distanceFromTop) /
+            static_cast<float>(crownHeight) * 3.5f
+        ));
+        if (distanceFromTop > 0 && radius == previousRadius &&
+            (yy & 1) == 0)
+        {
+            ++radius;
+        }
+        for (int xx = x - radius; xx <= x + radius; ++xx)
+            for (int zz = z - radius; zz <= z + radius; ++zz)
+                if ((std::abs(xx - x) != radius ||
+                     std::abs(zz - z) != radius || radius <= 0) &&
                     canReplace(context.getBlock(xx, yy, zz)))
                     context.setBlock(xx, yy, zz, BlockType::SpruceLeaves);
+        previousRadius = radius;
     }
     for (int yy = y; yy < y + height; ++yy)
         for (int dx = 0; dx < 2; ++dx)
@@ -852,5 +874,41 @@ bool TreeGenerator::generateMegaSpruce(
                     context.setBlock(
                         x + dx, yy, z + dz, BlockType::SpruceLog
                     );
+
+    // WorldGenMegaPineTree.generateSaplings spreads podzol in four circles
+    // around the 2x2 trunk. Apply the deterministic core patches here; the
+    // clone does not yet have a separate sapling post-pass.
+    constexpr int patchCentres[4][2] = {
+        {-1, -1}, {2, -1}, {-1, 2}, {2, 2}
+    };
+    for (const auto& centre : patchCentres)
+    {
+        for (int dx = -2; dx <= 2; ++dx)
+        {
+            for (int dz = -2; dz <= 2; ++dz)
+            {
+                if (std::abs(dx) == 2 && std::abs(dz) == 2)
+                    continue;
+                const int patchX = x + centre[0] + dx;
+                const int patchZ = z + centre[1] + dz;
+                for (int offsetY = 2; offsetY >= -3; --offsetY)
+                {
+                    const int patchY = y - 1 + offsetY;
+                    const BlockType block = context.getBlock(
+                        patchX, patchY, patchZ
+                    );
+                    if (block == BlockType::Grass || block == BlockType::Dirt)
+                    {
+                        context.setBlock(
+                            patchX, patchY, patchZ, BlockType::Podzol
+                        );
+                        break;
+                    }
+                    if (block != BlockType::Air && offsetY < 0)
+                        break;
+                }
+            }
+        }
+    }
     return true;
 }

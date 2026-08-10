@@ -4,6 +4,8 @@
 #include "worldgen/Biome.h"
 #include "worldgen/JavaRandom.h"
 
+#include <optional>
+#include <utility>
 #include <vector>
 
 class BiomeMap
@@ -26,6 +28,12 @@ public:
         int originCellZ,
         int width,
         int depth) const;
+
+    // Mirrors BiomeProvider::findBiomePosition for the Overworld spawn list:
+    // choose one suitable generation cell within 256 blocks using reservoir
+    // sampling seeded by the world seed.
+    [[nodiscard]] std::optional<std::pair<int, int>> findSpawnBiomePosition(
+        int range = 256) const;
 
 private:
     int seed_ = 0;

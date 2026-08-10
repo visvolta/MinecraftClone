@@ -39,7 +39,8 @@ BiomeRegistry makeVanillaRegistry()
     auto value = biome(0, "ocean", "Ocean", -1.0f, 0.1f, 0.5f, 0.5f);
     value.treeFeature = TreeFeature::None; add(std::move(value));
     value = biome(1, "plains", "Plains", 0.125f, 0.05f, 0.8f, 0.4f);
-    value.treesPerChunk = 0; value.grassPerChunk = 10; value.flowersPerChunk = 4; add(std::move(value));
+    value.treesPerChunk = 0; value.extraTreeChance = 0.05f;
+    value.grassPerChunk = 10; value.flowersPerChunk = 4; add(std::move(value));
     value = biome(2, "desert", "Desert", 0.125f, 0.05f, 2.0f, 0.0f);
     value.rain = false; value.topBlock = BlockType::Sand; value.fillerBlock = BlockType::Sand;
     value.treeFeature = TreeFeature::None; value.treesPerChunk = -999;

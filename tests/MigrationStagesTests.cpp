@@ -58,6 +58,29 @@ int main()
         assert(firstSamples[index].biome == secondSamples[index].biome);
         assert(vanilla.find(firstSamples[index].biome) != nullptr);
     }
+    for (int x = 0; x < 16; ++x)
+    {
+        for (int z = 0; z < 16; ++z)
+        {
+            const ClimateSample direct = biomeMap.sample(-32 + x, 48 + z);
+            const ClimateSample& batched = firstSamples[static_cast<std::size_t>(
+                x * 16 + z
+            )];
+            assert(direct.biome == batched.biome);
+        }
+    }
+    const auto spawnBiome = biomeMap.findSpawnBiomePosition();
+    assert(spawnBiome);
+    const BiomeId spawnBiomeId = biomeMap.sample(
+        spawnBiome->first, spawnBiome->second
+    ).biome;
+    assert(spawnBiomeId == VanillaBiomes::Forest ||
+           spawnBiomeId == VanillaBiomes::Plains ||
+           spawnBiomeId == VanillaBiomes::Taiga ||
+           spawnBiomeId == VanillaBiomes::TaigaHills ||
+           spawnBiomeId == VanillaBiomes::ForestHills ||
+           spawnBiomeId == VanillaBiomes::Jungle ||
+           spawnBiomeId == VanillaBiomes::JungleHills);
     BiomeRegistry custom = BiomeRegistry::mutableVanilla();
     const BiomeId customId = custom.nextCustomId();
     assert(customId >= 256);

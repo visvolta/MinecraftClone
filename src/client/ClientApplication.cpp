@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -44,6 +45,8 @@
 #include "content/resources/ResourcePack.h"
 #include "engine/FixedStepClock.h"
 #include "game/GameBootstrap.h"
+#include "worldgen/BiomeMap.h"
+#include "worldgen/SurfaceBuilder.h"
 
 namespace
 {
@@ -171,11 +174,17 @@ namespace
         const World& world,
         const Player& player,
         const Inventory& inventory,
-        const Atmosphere& atmosphere)
+        const Atmosphere& atmosphere,
+        const glm::vec3& spawnFeetPosition)
     {
         GameSaveData data;
         data.seed = world.getSeed();
         data.worldTime = atmosphere.getWorldTime();
+        data.spawnPosition = glm::ivec3(
+            static_cast<int>(std::floor(spawnFeetPosition.x)),
+            static_cast<int>(std::floor(spawnFeetPosition.y)),
+            static_cast<int>(std::floor(spawnFeetPosition.z))
+        );
         data.player = player.persistentState();
         data.inventory = inventory.getSlots();
         data.selectedHotbarSlot = inventory.getSelectedHotbarSlot();
@@ -183,6 +192,95 @@ namespace
         data.blockEntities = world.getBlockEntitySnapshots();
         data.fluidTicks = world.getScheduledFluidTickSnapshots();
         return data;
+    }
+
+    std::pair<int, int> preferredSpawnColumn(int seed)
+    {
+        return BiomeMap(seed).findSpawnBiomePosition(256).value_or(
+            std::pair{8, 8}
+        );
+    }
+
+    bool isClearForPlayer(const World& world, const glm::vec3& feetPosition)
+    {
+        if (feetPosition.y < 1.0f ||
+            feetPosition.y + 1.8f >= static_cast<float>(Chunk::HEIGHT))
+        {
+            return false;
+        }
+        const int minimumX = static_cast<int>(std::floor(feetPosition.x - 0.3f));
+        const int maximumX = static_cast<int>(std::floor(feetPosition.x + 0.3f));
+        const int minimumY = static_cast<int>(std::floor(feetPosition.y));
+        const int maximumY = static_cast<int>(std::floor(feetPosition.y + 1.79f));
+        const int minimumZ = static_cast<int>(std::floor(feetPosition.z - 0.3f));
+        const int maximumZ = static_cast<int>(std::floor(feetPosition.z + 0.3f));
+        if (!world.isBlockLoaded(
+                static_cast<int>(std::floor(feetPosition.x)),
+                minimumY,
+                static_cast<int>(std::floor(feetPosition.z))))
+        {
+            return false;
+        }
+        for (int x = minimumX; x <= maximumX; ++x)
+            for (int y = minimumY; y <= maximumY; ++y)
+                for (int z = minimumZ; z <= maximumZ; ++z)
+                    if (world.isSolidBlock(x, y, z))
+                        return false;
+        return true;
+    }
+
+    glm::vec3 safeSpawnFeet(
+        const World& world,
+        int preferredX,
+        int preferredZ)
+    {
+        const auto search = [&](bool requireGrass) -> std::optional<glm::vec3>
+        {
+            constexpr int searchRadius = 24;
+            for (int radius = 0; radius <= searchRadius; ++radius)
+            {
+                for (int offsetX = -radius; offsetX <= radius; ++offsetX)
+                {
+                    for (int offsetZ = -radius; offsetZ <= radius; ++offsetZ)
+                    {
+                        if (radius != 0 && std::abs(offsetX) != radius &&
+                            std::abs(offsetZ) != radius)
+                            continue;
+                        const int x = preferredX + offsetX;
+                        const int z = preferredZ + offsetZ;
+                        if (!world.isBlockLoaded(x, SurfaceBuilder::SEA_LEVEL, z))
+                            continue;
+                        const int surfaceY = world.getHighestSolidBlockY(x, z);
+                        if (surfaceY < 0 || surfaceY + 2 >= Chunk::HEIGHT)
+                            continue;
+                        const BlockType surface = world.getBlock(x, surfaceY, z);
+                        if (requireGrass && surface != BlockType::Grass)
+                            continue;
+                        if (!requireGrass &&
+                            (isLeaf(surface) || isLog(surface) || isLiquid(surface)))
+                            continue;
+                        const glm::vec3 feet(
+                            static_cast<float>(x) + 0.5f,
+                            static_cast<float>(surfaceY + 1),
+                            static_cast<float>(z) + 0.5f
+                        );
+                        if (isClearForPlayer(world, feet))
+                            return feet;
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+
+        if (const auto grass = search(true))
+            return *grass;
+        if (const auto fallback = search(false))
+            return *fallback;
+        return {
+            static_cast<float>(preferredX) + 0.5f,
+            static_cast<float>(SurfaceBuilder::SEA_LEVEL + 2),
+            static_cast<float>(preferredZ) + 0.5f
+        };
     }
 }
 
@@ -354,38 +452,77 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             atmosphere.setWorldTime(loadedSave->worldTime);
         }
 
-        // Spawn in the centre of a block column, one block above its surface.
-        // X/Z use +0.5 because Minecraft block coordinates describe minimum corners.
-        const int spawnBlockX = 0;
-        const int spawnBlockZ = 20;
-        const glm::vec3 spawnColumn(
+        const int worldSeed = loadedSave ? loadedSave->seed : 1337;
+        std::pair<int, int> spawnColumnCoordinates = loadedSave &&
+            loadedSave->spawnPosition
+            ? std::pair{
+                loadedSave->spawnPosition->x,
+                loadedSave->spawnPosition->z
+            }
+            : preferredSpawnColumn(worldSeed);
+        int spawnBlockX = spawnColumnCoordinates.first;
+        int spawnBlockZ = spawnColumnCoordinates.second;
+        glm::vec3 spawnColumn(
             static_cast<float>(spawnBlockX) + 0.5f,
             0.0f,
             static_cast<float>(spawnBlockZ) + 0.5f
         );
 
-        const glm::vec3 initialLoadPosition = loadedSave
+        const bool savedPlayerPositionPlausible = loadedSave &&
+            loadedSave->player.position.y >= 1.0f &&
+            loadedSave->player.position.y < static_cast<float>(Chunk::HEIGHT - 2);
+        const glm::vec3 initialLoadPosition = savedPlayerPositionPlausible
             ? loadedSave->player.position
             : spawnColumn;
         world->update(initialLoadPosition);
         world->finishInitialLoad();
 
-        // Start rendering after only the 3x3 spawn area is ready. The full
-        // seven-chunk distance then streams in asynchronously during gameplay.
+        bool restoreSavedPlayer = savedPlayerPositionPlausible &&
+            isClearForPlayer(*world, loadedSave->player.position);
+
+        glm::vec3 spawnFeetPosition;
+        if (loadedSave && loadedSave->spawnPosition)
+        {
+            spawnFeetPosition = {
+                static_cast<float>(loadedSave->spawnPosition->x) + 0.5f,
+                static_cast<float>(loadedSave->spawnPosition->y),
+                static_cast<float>(loadedSave->spawnPosition->z) + 0.5f
+            };
+        }
+        else
+        {
+            // Old saves had no world spawn. Load the 1.12-selected biome once,
+            // resolve a safe grass column, then return to a valid saved player.
+            if (savedPlayerPositionPlausible)
+            {
+                world->update(spawnColumn);
+                world->finishInitialLoad();
+            }
+            spawnFeetPosition = safeSpawnFeet(
+                *world, spawnBlockX, spawnBlockZ
+            );
+            if (restoreSavedPlayer)
+            {
+                world->update(initialLoadPosition);
+                world->finishInitialLoad();
+            }
+        }
+
+        if (!restoreSavedPlayer && !isClearForPlayer(*world, spawnFeetPosition))
+        {
+            world->update(spawnColumn);
+            world->finishInitialLoad();
+            spawnFeetPosition = safeSpawnFeet(
+                *world, spawnBlockX, spawnBlockZ
+            );
+        }
+
+        // Start rendering after only the 3x3 spawn area is ready. The selected
+        // gameplay distance then streams in asynchronously.
         world->setRenderDistance(gameplayRenderDistance);
 
-        const float spawnFeetY =
-            static_cast<float>(world->getHighestSolidBlockY(spawnBlockX, spawnBlockZ) + 1);
-
-        glm::vec3 spawnFeetPosition(
-            spawnColumn.x,
-            spawnFeetY,
-            spawnColumn.z
-        );
-        Player player(initialLoadPosition.y > 0.0f
-            ? initialLoadPosition
-            : spawnFeetPosition);
-        if (loadedSave)
+        Player player(restoreSavedPlayer ? initialLoadPosition : spawnFeetPosition);
+        if (restoreSavedPlayer)
             player.restorePersistentState(loadedSave->player);
         camera.setPosition(player.getEyePosition());
 
@@ -446,7 +583,8 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 if (gameTick % 600 == 0)
                 {
                     const GameSaveData data = captureSaveData(
-                        *world, player, inventory, atmosphere
+                        *world, player, inventory, atmosphere,
+                        spawnFeetPosition
                     );
                     if (!SaveGame::save(
                             savePath,
@@ -1126,20 +1264,26 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 // Destroy the old world first so its workers stop and its GPU
                 // meshes are released while the OpenGL context is current.
                 world.reset();
+                spawnColumnCoordinates = preferredSpawnColumn(
+                    *requestedNewWorldSeed
+                );
+                spawnBlockX = spawnColumnCoordinates.first;
+                spawnBlockZ = spawnColumnCoordinates.second;
+                spawnColumn = {
+                    static_cast<float>(spawnBlockX) + 0.5f,
+                    0.0f,
+                    static_cast<float>(spawnBlockZ) + 0.5f
+                };
                 world = std::make_unique<World>(
                     startupRenderDistance,
                     *requestedNewWorldSeed
                 );
                 world->update(spawnColumn);
                 world->finishInitialLoad();
-                world->setRenderDistance(gameplayRenderDistance);
-
-                spawnFeetPosition.y = static_cast<float>(
-                    world->getHighestSolidBlockY(
-                        spawnBlockX,
-                        spawnBlockZ
-                    ) + 1
+                spawnFeetPosition = safeSpawnFeet(
+                    *world, spawnBlockX, spawnBlockZ
                 );
+                world->setRenderDistance(gameplayRenderDistance);
                 player.respawn(spawnFeetPosition);
                 inventory = Inventory{};
                 itemEntities.clear();
@@ -1170,7 +1314,8 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     *world,
                     player,
                     inventory,
-                    atmosphere
+                    atmosphere,
+                    spawnFeetPosition
                 );
                 if (!SaveGame::save(
                         savePath,
@@ -1194,7 +1339,8 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         }
 
         const GameSaveData finalSave = captureSaveData(
-            *world, player, inventory, atmosphere
+            *world, player, inventory, atmosphere,
+            spawnFeetPosition
         );
         if (!SaveGame::save(
                 savePath,

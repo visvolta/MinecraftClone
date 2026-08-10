@@ -170,7 +170,9 @@ void PopulationGenerator::populate(
                 int treeCount = biomeDefinition == nullptr
                     ? 0
                     : biomeDefinition->treesPerChunk;
-                if (random.nextInt(10) == 0)
+                if (random.nextFloat() < (biomeDefinition == nullptr
+                        ? 0.1f
+                        : biomeDefinition->extraTreeChance))
                     ++treeCount;
 
                 for (int attempt = 0; attempt < treeCount; ++attempt)

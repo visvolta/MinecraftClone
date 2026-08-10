@@ -5,6 +5,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace
 {
@@ -41,6 +42,78 @@ std::uint32_t coordinateRandom(
     value *= 0x94D049BB133111EBULL;
     value ^= value >> 31U;
     return static_cast<std::uint32_t>(value >> 32U);
+}
+
+int floorDivide(int value, int divisor) noexcept
+{
+    int quotient = value / divisor;
+    const int remainder = value % divisor;
+    if (remainder != 0 && ((remainder < 0) != (divisor < 0)))
+        --quotient;
+    return quotient;
+}
+
+struct BiomeRegion
+{
+    int cellX = 0;
+    int cellZ = 0;
+};
+
+BiomeRegion nearestBiomeRegion(int seed, int worldX, int worldZ) noexcept
+{
+    // Release 1.12's biome chain applies six zooms before the block-resolution
+    // Voronoi layer. A 96-block site spacing preserves those broad, coherent
+    // regions without allowing a new random biome every four blocks.
+    constexpr int regionSize = 96;
+    constexpr int inset = 12;
+    constexpr int jitterRange = regionSize - inset * 2;
+    const int centreX = floorDivide(worldX, regionSize);
+    const int centreZ = floorDivide(worldZ, regionSize);
+    BiomeRegion nearest{centreX, centreZ};
+    std::int64_t nearestDistance =
+        std::numeric_limits<std::int64_t>::max();
+
+    for (int cellX = centreX - 1; cellX <= centreX + 1; ++cellX)
+    {
+        for (int cellZ = centreZ - 1; cellZ <= centreZ + 1; ++cellZ)
+        {
+            const std::uint32_t random = coordinateRandom(
+                seed, cellX, cellZ, 10U
+            );
+            const int siteX = cellX * regionSize + inset +
+                static_cast<int>(random % jitterRange);
+            const int siteZ = cellZ * regionSize + inset +
+                static_cast<int>((random >> 16U) % jitterRange);
+            const std::int64_t dx =
+                static_cast<std::int64_t>(worldX) - siteX;
+            const std::int64_t dz =
+                static_cast<std::int64_t>(worldZ) - siteZ;
+            const std::int64_t distance = dx * dx + dz * dz;
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearest = {cellX, cellZ};
+            }
+        }
+    }
+    return nearest;
+}
+
+bool isSpawnBiome(BiomeId biome) noexcept
+{
+    switch (biome)
+    {
+        case VanillaBiomes::Forest:
+        case VanillaBiomes::Plains:
+        case VanillaBiomes::Taiga:
+        case VanillaBiomes::TaigaHills:
+        case VanillaBiomes::ForestHills:
+        case VanillaBiomes::Jungle:
+        case VanillaBiomes::JungleHills:
+            return true;
+        default:
+            return false;
+    }
 }
 
 BiomeId selectWeightedBiome(
@@ -147,6 +220,42 @@ std::vector<ClimateSample> BiomeMap::sampleGenerationArea(
     return sampleGrid(originCellX, originCellZ, width, depth, 4);
 }
 
+std::optional<std::pair<int, int>> BiomeMap::findSpawnBiomePosition(
+    int range) const
+{
+    range = std::max(0, range);
+    const int minimumCell = floorDivide(-range, 4);
+    const int maximumCell = floorDivide(range, 4);
+    const int size = maximumCell - minimumCell + 1;
+    const std::vector<ClimateSample> biomes = sampleGenerationArea(
+        minimumCell, minimumCell, size, size
+    );
+
+    JavaRandom random(seed_);
+    std::optional<std::pair<int, int>> selected;
+    int matches = 0;
+    for (int cellX = 0; cellX < size; ++cellX)
+    {
+        for (int cellZ = 0; cellZ < size; ++cellZ)
+        {
+            const ClimateSample& sample = biomes[static_cast<std::size_t>(
+                cellX * size + cellZ
+            )];
+            if (!isSpawnBiome(sample.biome))
+                continue;
+            if (!selected || random.nextInt(matches + 1) == 0)
+            {
+                selected = std::pair{
+                    (minimumCell + cellX) * 4,
+                    (minimumCell + cellZ) * 4
+                };
+            }
+            ++matches;
+        }
+    }
+    return selected;
+}
+
 std::vector<ClimateSample> BiomeMap::sampleGrid(
     int originX,
     int originZ,
@@ -167,8 +276,8 @@ std::vector<ClimateSample> BiomeMap::sampleGrid(
         static_cast<double>(originZ),
         width,
         depth,
-        0.02500000037252903 * sampleSpacing,
-        0.02500000037252903 * sampleSpacing,
+        (1.0 / 384.0) * sampleSpacing,
+        (1.0 / 384.0) * sampleSpacing,
         0.25
     );
 
@@ -178,8 +287,8 @@ std::vector<ClimateSample> BiomeMap::sampleGrid(
         static_cast<double>(originZ),
         width,
         depth,
-        0.05000000074505806 * sampleSpacing,
-        0.05000000074505806 * sampleSpacing,
+        (1.0 / 384.0) * sampleSpacing,
+        (1.0 / 384.0) * sampleSpacing,
         0.3333333333333333
     );
 
@@ -189,8 +298,8 @@ std::vector<ClimateSample> BiomeMap::sampleGrid(
         static_cast<double>(originZ),
         width,
         depth,
-        0.25 * sampleSpacing,
-        0.25 * sampleSpacing,
+        (1.0 / 192.0) * sampleSpacing,
+        (1.0 / 192.0) * sampleSpacing,
         0.5882352941176471
     );
 
@@ -241,31 +350,28 @@ std::vector<ClimateSample> BiomeMap::sampleGrid(
         humidity =
             std::clamp(humidity, 0.0, 1.0);
 
-        const double terrain = std::clamp(
-            continentalness[index] * 0.85 + detail[index] * 0.15,
-            -1.0,
-            1.0
-        );
+        const double terrain = std::clamp(continentalness[index], -1.0, 1.0);
         const int gridX = originX + static_cast<int>(index / depth);
         const int gridZ = originZ + static_cast<int>(index % depth);
         const int worldX = gridX * spacing;
         const int worldZ = gridZ * spacing;
+        const BiomeRegion region = nearestBiomeRegion(seed_, worldX, worldZ);
         const std::uint32_t primaryChoice = coordinateRandom(
-            seed_, worldX >> 2, worldZ >> 2, 200U
+            seed_, region.cellX, region.cellZ, 200U
         );
 
         BiomeId biome = VanillaBiomes::Plains;
-        if (terrain < -0.66)
+        if (terrain < -0.64)
         {
             biome = VanillaBiomes::DeepOcean;
         }
-        else if (terrain < -0.43)
+        else if (terrain < -0.38)
         {
             biome = temperature < 0.15
                 ? VanillaBiomes::FrozenOcean
                 : VanillaBiomes::Ocean;
         }
-        else if (terrain < -0.33)
+        else if (terrain < -0.29)
         {
             biome = temperature < 0.15
                 ? VanillaBiomes::ColdBeach
@@ -282,7 +388,7 @@ std::vector<ClimateSample> BiomeMap::sampleGrid(
                 category = BiomeClimateCategory::Cold;
 
             const bool special = coordinateRandom(
-                seed_, worldX >> 4, worldZ >> 4, 3U
+                seed_, region.cellX, region.cellZ, 3U
             ) % 13U == 0U;
             if (special && category == BiomeClimateCategory::Warm)
             {
@@ -303,21 +409,23 @@ std::vector<ClimateSample> BiomeMap::sampleGrid(
                 biome = selectWeightedBiome(category, primaryChoice);
             }
 
+            const int hillCellX = floorDivide(worldX, 48);
+            const int hillCellZ = floorDivide(worldZ, 48);
             if (coordinateRandom(
-                    seed_, worldX >> 3, worldZ >> 3, 1000U
-                ) % 3U == 0U && std::abs(detail[index]) > 0.18)
+                    seed_, hillCellX, hillCellZ, 1000U
+                ) % 5U == 0U && std::abs(detail[index]) > 0.08)
             {
                 biome = hillVariant(biome);
             }
             if (coordinateRandom(
-                    seed_, worldX >> 3, worldZ >> 3, 1001U
+                    seed_, region.cellX, region.cellZ, 1001U
                 ) % 29U == 1U)
             {
                 biome = mutationVariant(biome);
             }
 
             // GenLayerRiverMix replaces non-ocean land after hills and shore.
-            if (std::abs(detail[index]) < 0.018 &&
+            if (std::abs(detail[index]) < 0.012 &&
                 biome != VanillaBiomes::MushroomIsland &&
                 biome != VanillaBiomes::MushroomShore)
             {

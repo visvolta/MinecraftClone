@@ -8,6 +8,10 @@
 #include "worldgen/PopulationGenerator.h"
 #include "worldgen/SurfaceBuilder.h"
 
+#include <cstdint>
+#include <deque>
+#include <memory>
+#include <unordered_map>
 #include <vector>
 
 class Chunk;
@@ -16,6 +20,7 @@ class TerrainGenerator
 {
 public:
     explicit TerrainGenerator(int seed = 1337);
+    ~TerrainGenerator();
 
     void generateChunk(Chunk& chunk) const;
 
@@ -53,6 +58,22 @@ private:
     mutable std::vector<double> depthField_;
     mutable std::vector<double> surfaceDepthField_;
 
+    // Population is replayed into independently generated target chunks. Keep
+    // a bounded cache of terrain-only chunks so every replay observes exactly
+    // the same surface height and border blocks before decoration.
+    mutable std::unordered_map<std::uint64_t, std::unique_ptr<Chunk>>
+        terrainCache_;
+    mutable std::deque<std::uint64_t> terrainCacheOrder_;
+
+    void generateTerrainOnly(Chunk& chunk) const;
+    [[nodiscard]] const Chunk& terrainChunkAt(int chunkX, int chunkZ) const;
+    void cacheTerrainChunk(const Chunk& chunk) const;
+    [[nodiscard]] static std::uint64_t terrainCacheKey(
+        int chunkX,
+        int chunkZ) noexcept;
+    [[nodiscard]] static int floorDivide(int value, int divisor) noexcept;
+    [[nodiscard]] static int positiveModulo(int value, int divisor) noexcept;
+
     void generateBaseTerrain(
         Chunk& chunk,
         const std::vector<ClimateSample>& climate) const;
@@ -69,11 +90,6 @@ private:
         int sizeY,
         int sizeZ,
         const std::vector<ClimateSample>& climate) const;
-
-    [[nodiscard]] BlockType sampleBaseBlock(
-        int worldX,
-        int worldY,
-        int worldZ) const;
 
     [[nodiscard]] static long long makeChunkSeed(
         int chunkX,

@@ -54,14 +54,6 @@ glm::vec3 hsbToRgb(float hue, float saturation, float brightness)
     }
 }
 
-float renderDistanceOption(float farPlaneDistance)
-{
-    return std::clamp(
-        std::log2(256.0f / farPlaneDistance),
-        0.0f,
-        3.0f
-    );
-}
 }
 
 void Atmosphere::tick(
@@ -84,15 +76,13 @@ void Atmosphere::tick(
         std::max(skyLight, blockLight)
     );
 
-    // EntityRenderer biases fog exposure toward full brightness at farther
-    // render-distance settings and eases toward the target by 10% per tick.
-    const float farPlane = std::clamp(
-        static_cast<float>(world.getRenderDistance()) * 16.0f,
-        32.0f,
-        256.0f
+    // EntityRenderer.updateRenderer uses renderDistanceChunks / 32 and eases
+    // the local light contribution by 10% every tick.
+    const float distanceBias = std::clamp(
+        static_cast<float>(world.getRenderDistance()) / 32.0f,
+        0.0f,
+        1.0f
     );
-    const float option = renderDistanceOption(farPlane);
-    const float distanceBias = (3.0f - option) / 3.0f;
     const float target =
         localBrightness * (1.0f - distanceBias) + distanceBias;
     fogExposure_ += (target - fogExposure_) * 0.1f;
@@ -131,14 +121,14 @@ AtmosphereState Atmosphere::sample(
         32.0f,
         256.0f
     );
-    const float option = renderDistanceOption(state.farPlaneDistance);
-    const float fogSkyBlend =
-        1.0f - std::pow(1.0f / (4.0f - option), 0.25f);
+    float fogSkyBlend = 0.25f + 0.75f *
+        static_cast<float>(std::clamp(renderDistanceChunks, 0, 32)) / 32.0f;
+    fogSkyBlend = 1.0f - std::pow(fogSkyBlend, 0.25f);
     state.fogColour = fogBase +
         (state.skyColour - fogBase) * fogSkyBlend;
 
     state.fogMode = FogMode::Linear;
-    state.fogStart = state.farPlaneDistance * 0.25f;
+    state.fogStart = state.farPlaneDistance * 0.75f;
     state.fogEnd = state.farPlaneDistance;
     state.fogDensity = 0.0f;
 
@@ -159,11 +149,9 @@ AtmosphereState Atmosphere::sample(
         (fogExposure_ - previousFogExposure_) * partialTick;
     state.fogColour *= fogExposure;
     state.horizonColour = state.fogColour;
-    state.lowerSkyColour = {
-        state.skyColour.r * 0.2f + 0.04f,
-        state.skyColour.g * 0.2f + 0.04f,
-        state.skyColour.b * 0.6f + 0.1f
-    };
+    // RenderGlobal draws the lower sky/void plane black and meets it at the
+    // fog-coloured horizon.
+    state.lowerSkyColour = glm::vec3(0.0f);
 
     const float sunsetCosine =
         std::cos(state.celestialAngle * PI * 2.0f);

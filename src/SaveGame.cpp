@@ -17,7 +17,8 @@ constexpr std::array<char, 8> MAGIC{{'M','C','B','1','7','3','S','V'}};
 constexpr std::uint32_t LEGACY_VERSION = 1;
 constexpr std::uint32_t NAMESPACED_BLOCK_VERSION = 2;
 constexpr std::uint32_t REGISTRY_ENTITY_VERSION = 3;
-constexpr std::uint32_t VERSION = 4;
+constexpr std::uint32_t SURVIVAL_HEIGHT_VERSION = 4;
+constexpr std::uint32_t VERSION = 5;
 constexpr int LEGACY_HEIGHT = 128;
 constexpr std::size_t LEGACY_BLOCK_COUNT =
     static_cast<std::size_t>(Chunk::WIDTH * LEGACY_HEIGHT * Chunk::DEPTH);
@@ -260,7 +261,7 @@ ChunkSnapshot readNamespacedChunk(
         }
         chunk.palette.push_back(*state);
     }
-    if (version >= VERSION)
+    if (version >= SURVIVAL_HEIGHT_VERSION)
     {
         const std::uint16_t height = reader.value<std::uint16_t>();
         if (height != Chunk::HEIGHT)
@@ -305,7 +306,7 @@ ChunkSnapshot readNamespacedChunk(
     }
     reader.bytes(chunk.temperatures.data(), chunk.temperatures.size() * sizeof(float));
     reader.bytes(chunk.humidities.data(), chunk.humidities.size() * sizeof(float));
-    if (version >= VERSION)
+    if (version >= SURVIVAL_HEIGHT_VERSION)
     {
         reader.bytes(
             chunk.biomeIds.data(),
@@ -341,6 +342,10 @@ void writeData(
     writer.value(VERSION);
     writer.value(data.seed);
     writer.value(data.worldTime);
+    const glm::ivec3 spawn = data.spawnPosition.value_or(glm::ivec3(0, 64, 0));
+    writer.value(spawn.x);
+    writer.value(spawn.y);
+    writer.value(spawn.z);
     writer.value(data.player.position.x);
     writer.value(data.player.position.y);
     writer.value(data.player.position.z);
@@ -409,12 +414,25 @@ GameSaveData readData(
     if (version != LEGACY_VERSION &&
         version != NAMESPACED_BLOCK_VERSION &&
         version != REGISTRY_ENTITY_VERSION &&
+        version != SURVIVAL_HEIGHT_VERSION &&
         version != VERSION)
         throw std::runtime_error("Unsupported world save version");
 
     GameSaveData data;
     data.seed = reader.value<int>();
     data.worldTime = reader.value<std::uint64_t>();
+    if (version >= VERSION)
+    {
+        const int spawnX = reader.value<int>();
+        const int spawnY = reader.value<int>();
+        const int spawnZ = reader.value<int>();
+        data.spawnPosition = glm::ivec3(spawnX, spawnY, spawnZ);
+        if (data.spawnPosition->y < 0 ||
+            data.spawnPosition->y >= Chunk::HEIGHT)
+        {
+            throw std::runtime_error("World save contains an invalid spawn point");
+        }
+    }
     data.player.position.x = reader.value<float>();
     data.player.position.y = reader.value<float>();
     data.player.position.z = reader.value<float>();
@@ -423,7 +441,7 @@ GameSaveData readData(
     data.player.air = reader.value<int>();
     data.player.fireTicks = reader.value<int>();
     data.player.ticksExisted = reader.value<int>();
-    if (version >= VERSION)
+    if (version >= SURVIVAL_HEIGHT_VERSION)
     {
         data.player.survival.foodLevel = reader.value<int>();
         data.player.survival.saturation = reader.value<float>();
@@ -438,7 +456,7 @@ GameSaveData readData(
     data.selectedHotbarSlot = reader.value<int>();
     if (data.selectedHotbarSlot < 0 || data.selectedHotbarSlot >= Inventory::HOTBAR_SIZE)
         throw std::runtime_error("World save contains an invalid selected slot");
-    const int savedInventorySlots = version >= VERSION
+    const int savedInventorySlots = version >= SURVIVAL_HEIGHT_VERSION
         ? Inventory::SLOT_COUNT
         : Inventory::MAIN_SLOT_COUNT;
     for (int slot = 0; slot < savedInventorySlots; ++slot)

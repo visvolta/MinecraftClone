@@ -74,9 +74,11 @@ TemplateNbt flatNbt(const Node&n)
 {
     TemplateNbt out;for(const auto&[k,v]:n.compound){if(!v.text.empty())out.strings.emplace(k,v.text);else{out.ints.emplace(k,v.integer);out.bytes.emplace(k,v.byte);}}return out;
 }
-std::array<int,3> transform(int x,int y,int z,Rotation rot)
+std::array<int,3> transform(int x,int y,int z,Rotation rot,Mirror mirror=Mirror::None)
 {
-    // Template::transformedBlockPos(..., Mirror.NONE, rotation), 1.12.2.
+    // Template::transformedBlockPos(..., mirror, rotation), 1.12.2.
+    if(mirror==Mirror::LeftRight) z=-z;
+    else if(mirror==Mirror::FrontBack) x=-x;
     switch(rot)
     {
         case Rotation::CounterClockwise90:return{z,y,-x};
@@ -85,6 +87,78 @@ std::array<int,3> transform(int x,int y,int z,Rotation rot)
         case Rotation::None:return{x,y,z};
     }
     return{x,y,z};
+}
+
+mc::content::BlockState mirrorState(mc::content::BlockState value,Mirror mirror)
+{
+    if(mirror==Mirror::None) return value;
+    const auto* active=mc::content::ContentCatalog::active();
+    if(active==nullptr) return value;
+    const auto* name=active->blockName(value);
+    if(name==nullptr) return value;
+    auto props=active->serializeStateProperties(value);
+    for(auto& [key,val]:props)
+    {
+        if(key=="facing")
+        {
+            if(mirror==Mirror::LeftRight)
+            {
+                if(val=="north") val="south"; else if(val=="south") val="north";
+            }
+            else
+            {
+                if(val=="east") val="west"; else if(val=="west") val="east";
+            }
+        }
+        else if(key=="rotation")
+        {
+            try
+            {
+                int r=std::stoi(val)&15;
+                r=(mirror==Mirror::LeftRight)?((8-r)&15):((16-r)&15);
+                val=std::to_string(r);
+            }
+            catch(...){}
+        }
+        else if(key=="shape")
+        {
+            // Stair mirrors swap handedness. Rail shapes encode compass
+            // directions and are reflected explicitly below.
+            if(val=="inner_left") val="inner_right";
+            else if(val=="inner_right") val="inner_left";
+            else if(val=="outer_left") val="outer_right";
+            else if(val=="outer_right") val="outer_left";
+            else if(mirror==Mirror::LeftRight)
+            {
+                if(val=="ascending_north") val="ascending_south";
+                else if(val=="ascending_south") val="ascending_north";
+                else if(val=="north_east") val="south_east";
+                else if(val=="north_west") val="south_west";
+                else if(val=="south_east") val="north_east";
+                else if(val=="south_west") val="north_west";
+            }
+            else
+            {
+                if(val=="ascending_east") val="ascending_west";
+                else if(val=="ascending_west") val="ascending_east";
+                else if(val=="north_east") val="north_west";
+                else if(val=="north_west") val="north_east";
+                else if(val=="south_east") val="south_west";
+                else if(val=="south_west") val="south_east";
+            }
+        }
+    }
+    // Multipart directional properties (vines, fences/walls in imported
+    // palettes) carry directions as property keys.
+    auto swapProp=[&](std::string_view a,std::string_view b)
+    {
+        auto ia=std::find_if(props.begin(),props.end(),[&](const auto&p){return p.first==a;});
+        auto ib=std::find_if(props.begin(),props.end(),[&](const auto&p){return p.first==b;});
+        if(ia!=props.end()&&ib!=props.end()) std::swap(ia->second,ib->second);
+    };
+    if(mirror==Mirror::LeftRight) swapProp("north","south"); else swapProp("east","west");
+    const auto result=active->state(*name,std::span<const std::pair<std::string,std::string>>(props));
+    return result.value_or(value);
 }
 }
 
@@ -108,34 +182,34 @@ std::array<int,3> StructureTemplate::transformedSize(Rotation rotation) const no
 }
 
 std::array<int,3> StructureTemplate::transformedBlockPosition(
-    int x,int y,int z,Rotation rotation) const noexcept
+    int x,int y,int z,Rotation rotation,Mirror mirror) const noexcept
 {
-    return transform(x,y,z,rotation);
+    return transform(x,y,z,rotation,mirror);
 }
 
 std::array<int,3> StructureTemplate::getZeroPositionWithTransform(
-    int x,int y,int z,Rotation rotation) const noexcept
+    int x,int y,int z,Rotation rotation,Mirror mirror) const noexcept
 {
-    // Template::func_191157_a(pos, Mirror.NONE, rotation, sizeX, sizeZ).
-    const int lastX=sizeX-1;
-    const int lastZ=sizeZ-1;
-    switch(rotation)
-    {
-        case Rotation::CounterClockwise90:return{x,y,z+lastX};
-        case Rotation::Clockwise90:return{x+lastZ,y,z};
-        case Rotation::Clockwise180:return{x+lastX,y,z+lastZ};
-        case Rotation::None:return{x,y,z};
-    }
-    return{x,y,z};
+    // Template::func_191157_a with the template's actual dimensions.
+    int i=sizeX-1,j=sizeZ-1;
+    const bool frontBack=mirror==Mirror::FrontBack;
+    const bool leftRight=mirror==Mirror::LeftRight;
+    if(rotation==Rotation::CounterClockwise90)
+        return{leftRight?x:x+j,y,frontBack?z+i:z};
+    if(rotation==Rotation::Clockwise90)
+        return{leftRight?x+i:x,y,frontBack?z:z+j};
+    if(rotation==Rotation::Clockwise180)
+        return{frontBack?x:x+i,y,leftRight?z:z+j};
+    return{frontBack?x+i:x,y,leftRight?z+j:z};
 }
 
-Box StructureTemplate::transformedBox(int ox,int oy,int oz,Rotation rot)const noexcept
+Box StructureTemplate::transformedBox(int ox,int oy,int oz,Rotation rot,Mirror mirror)const noexcept
 {
     const std::array<std::array<int,3>,4> corners{{
-        transform(0,0,0,rot),
-        transform(sizeX-1,0,0,rot),
-        transform(0,0,sizeZ-1,rot),
-        transform(sizeX-1,0,sizeZ-1,rot)}};
+        transform(0,0,0,rot,mirror),
+        transform(sizeX-1,0,0,rot,mirror),
+        transform(0,0,sizeZ-1,rot,mirror),
+        transform(sizeX-1,0,sizeZ-1,rot,mirror)}};
     int minX=corners[0][0],maxX=corners[0][0];
     int minZ=corners[0][2],maxZ=corners[0][2];
     for(const auto& c:corners)
@@ -146,16 +220,16 @@ Box StructureTemplate::transformedBox(int ox,int oy,int oz,Rotation rot)const no
     return{ox+minX,oy,oz+minZ,ox+maxX,oy+sizeY-1,oz+maxZ};
 }
 
-void StructureTemplate::place(WorldGenerationContext&c,int ox,int oy,int oz,Rotation rot,const Box&clip,float integrity,JavaRandom*random,bool ignoreStructureBlocks,const TemplateMarkerHandler& markerHandler)const
+void StructureTemplate::place(WorldGenerationContext&c,int ox,int oy,int oz,Rotation rot,const Box&clip,float integrity,JavaRandom*random,bool ignoreStructureBlocks,const TemplateMarkerHandler& markerHandler,Mirror mirror)const
 {
     const auto*catalog=mc::content::ContentCatalog::active();if(catalog==nullptr)throw std::logic_error("Content catalog inactive during structure placement");
     std::vector<mc::content::BlockState> resolved;resolved.reserve(palette.size());
-    for(const auto&p:palette){resolved.push_back(rotateState(vanilla112State(p.name,std::span<const Property>(p.properties)),rot));}
+    for(const auto&p:palette){resolved.push_back(rotateState(mirrorState(vanilla112State(p.name,std::span<const Property>(p.properties)),mirror),rot));}
     for(const TemplateBlock&b:blocks)
     {
         if(b.palette>=resolved.size())throw std::runtime_error("Structure palette index out of range");
         if(integrity<1.0f&&random!=nullptr&&random->nextFloat()>integrity)continue;
-        const auto local=transform(b.x,b.y,b.z,rot);const int x=ox+local[0],y=oy+local[1],z=oz+local[2];if(!clip.contains(x,y,z))continue;
+        const auto local=transform(b.x,b.y,b.z,rot,mirror);const int x=ox+local[0],y=oy+local[1],z=oz+local[2];if(!clip.contains(x,y,z))continue;
         const auto s=resolved[b.palette];
         if(named(s,"structure_block"))
         {

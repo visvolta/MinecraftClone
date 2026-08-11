@@ -6,6 +6,8 @@
 #include "worldgen/JavaRandom.h"
 #include "worldgen/MineshaftStructure.h"
 #include "worldgen/ScatteredFeatureStructure.h"
+#include "worldgen/StrongholdStructure.h"
+#include "worldgen/VillageStructure.h"
 #include "worldgen/StructurePrimitives.h"
 #include "worldgen/WorldGenerationContext.h"
 
@@ -138,6 +140,12 @@ std::optional<std::pair<int,int>> findStrongholdBiome(
     return selected;
 }
 
+std::uint64_t structureStartKey(int chunkX,int chunkZ) noexcept
+{
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(chunkX))<<32U) |
+           static_cast<std::uint32_t>(chunkZ);
+}
+
 JavaRandom mapGenRandom(std::int64_t seed,int chunkX,int chunkZ)
 {
     JavaRandom base(seed);
@@ -256,13 +264,21 @@ PopulationStructureResult StructureGenerator::populateSource(
                     std::max(std::abs(startX),std::abs(startZ))))
                 continue;
 
-            const BiomeId biome=context.sampleClimate(
-                startX*16+8,startZ*16+8).biome;
-            const auto type=mesaBiome(biome)
-                ? mc112::MineshaftStructure::Type::Mesa
-                : mc112::MineshaftStructure::Type::Normal;
-            auto start=mc112::MineshaftStructure::create(
-                startX,startZ,type,startRandom,63);
+            const auto key=structureStartKey(startX,startZ);
+            auto it=mineshaftStarts_.find(key);
+            if(it==mineshaftStarts_.end())
+            {
+                const BiomeId biome=context.sampleClimate(
+                    startX*16+8,startZ*16+8).biome;
+                const auto type=mesaBiome(biome)
+                    ? mc112::MineshaftStructure::Type::Mesa
+                    : mc112::MineshaftStructure::Type::Normal;
+                auto created=std::make_shared<mc112::MineshaftStructure::Start>(
+                    mc112::MineshaftStructure::create(
+                        startX,startZ,type,startRandom,63));
+                it=mineshaftStarts_.emplace(key,std::move(created)).first;
+            }
+            auto& start=*it->second;
             if(start.sizeable && start.bounds.intersects(clip))
             {
                 mc112::MineshaftStructure::place(
@@ -271,11 +287,70 @@ PopulationStructureResult StructureGenerator::populateSource(
         }
     }
 
-    // Village and stronghold occur before scattered features in
-    // ChunkGeneratorOverworld::populate. Their exact piece ports are not wired
-    // yet, so they intentionally emit no guessed geometry here. Scattered
-    // features below use the exact MapGenScatteredFeature spacing/start RNG and
-    // exact ports for the piece kinds that are implemented.
+    // MapGenVillage post-processes immediately after mineshafts in
+    // ChunkGeneratorOverworld::populate. Layout/start construction uses the
+    // MapGenStructure RNG, while addComponentParts consumes populationRandom.
+    for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
+    {
+        for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
+        {
+            if(!isVillageChunk(startX,startZ) || !villageBiomeViable(startX,startZ))
+                continue;
+
+            const auto key=structureStartKey(startX,startZ);
+            auto it=villageStarts_.find(key);
+            if(it==villageStarts_.end())
+            {
+                JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+                (void)startRandom.nextInt();
+                const BiomeId startBiome=context.sampleClimate(
+                    startX*16+2,startZ*16+2).biome;
+                auto created=std::make_shared<mc112::VillageStructure::Start>(
+                    mc112::VillageStructure::create(
+                        startX,startZ,startBiome,startRandom,0));
+                it=villageStarts_.emplace(key,std::move(created)).first;
+            }
+            auto& start=*it->second;
+            if(start.sizeable && start.bounds.intersects(clip))
+            {
+                mc112::VillageStructure::place(
+                    start,context,populationRandom,clip);
+                result.villageGenerated=true;
+            }
+        }
+    }
+
+    // Strongholds are the next structure family in vanilla population order.
+    // Only the 128 precomputed MapGenStronghold start chunks can construct a
+    // start; its internal retry loop guarantees a portal room.
+    for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
+    {
+        for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
+        {
+            if(!isStrongholdChunk(startX,startZ))
+                continue;
+            const auto key=structureStartKey(startX,startZ);
+            auto it=strongholdStarts_.find(key);
+            if(it==strongholdStarts_.end())
+            {
+                JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+                (void)startRandom.nextInt();
+                auto created=std::make_shared<mc112::StrongholdStructure::Start>(
+                    mc112::StrongholdStructure::create(
+                        startX,startZ,startRandom,63));
+                it=strongholdStarts_.emplace(key,std::move(created)).first;
+            }
+            auto& start=*it->second;
+            if(start.sizeable && start.bounds.intersects(clip))
+            {
+                mc112::StrongholdStructure::place(
+                    start,context,populationRandom,clip);
+            }
+        }
+    }
+
+    // Scattered features follow strongholds exactly in vanilla population
+    // order.
     for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
     {
         for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
@@ -287,13 +362,21 @@ PopulationStructureResult StructureGenerator::populateSource(
             if(!templeBiome(biome))
                 continue;
 
-            JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
-            // MapGenStructure::recursiveGenerate advances the mapgen RNG before
-            // canSpawnStructureAtCoords. The scattered spawn test itself uses
-            // World#setRandomSeed, so it consumes no draws from startRandom.
-            (void)startRandom.nextInt();
-            auto start=mc112::ScatteredFeatureStructure::create(
-                startX,startZ,biome,startRandom);
+            const auto key=structureStartKey(startX,startZ);
+            auto it=scatteredStarts_.find(key);
+            if(it==scatteredStarts_.end())
+            {
+                JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+                // MapGenStructure::recursiveGenerate advances the mapgen RNG before
+                // canSpawnStructureAtCoords. The scattered spawn test itself uses
+                // World#setRandomSeed, so it consumes no draws from startRandom.
+                (void)startRandom.nextInt();
+                auto created=std::make_shared<mc112::ScatteredFeatureStructure::Start>(
+                    mc112::ScatteredFeatureStructure::create(
+                        startX,startZ,biome,startRandom));
+                it=scatteredStarts_.emplace(key,std::move(created)).first;
+            }
+            auto& start=*it->second;
             if(start.sizeable && start.bounds.intersects(clip))
             {
                 mc112::ScatteredFeatureStructure::place(
@@ -302,8 +385,65 @@ PopulationStructureResult StructureGenerator::populateSource(
         }
     }
 
-    // Ocean monument and woodland mansion post-processing still wait for
-    // their exact 1.12.2 piece/template ports. No approximation is emitted.
+    // Ocean monuments follow scattered features. MapGenOceanMonument uses
+    // the 32/5 triangular grid with salt 10387313, then requires Deep Ocean
+    // in radius 16 and only ocean/river-family biomes in radius 29.
+    for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
+    {
+        for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
+        {
+            if(!isOceanMonumentChunk(startX,startZ) ||
+               !monumentBiomeViable(startX,startZ))
+                continue;
+
+            const auto key=structureStartKey(startX,startZ);
+            auto it=oceanMonumentStarts_.find(key);
+            if(it==oceanMonumentStarts_.end())
+            {
+                JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+                (void)startRandom.nextInt();
+                auto created=std::make_shared<mc112::OceanMonumentStructure::Start>(
+                    mc112::OceanMonumentStructure::create(
+                        worldSeed_,startX,startZ,startRandom));
+                it=oceanMonumentStarts_.emplace(key,std::move(created)).first;
+            }
+            auto& start=*it->second;
+            if(start.sizeable && start.bounds.intersects(clip))
+            {
+                mc112::OceanMonumentStructure::place(
+                    start,context,populationRandom,
+                    sourceChunkX,sourceChunkZ,clip);
+            }
+        }
+    }
+
+    // Woodland mansions are the final Overworld MapGenStructure family in
+    // ChunkGeneratorOverworld::populate. Their 80/20 triangular grid uses
+    // salt 10387319 and requires Roofed Forest throughout radius 32.
+    for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
+    {
+        for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
+        {
+            if(!isWoodlandMansionChunk(startX,startZ) ||
+               !mansionBiomeViable(startX,startZ))
+                continue;
+            const auto key=structureStartKey(startX,startZ);
+            auto it=woodlandMansionStarts_.find(key);
+            if(it==woodlandMansionStarts_.end())
+            {
+                JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+                (void)startRandom.nextInt();
+                auto created=std::make_shared<mc112::WoodlandMansionStructure::Start>(
+                    mc112::WoodlandMansionStructure::create(
+                        startX,startZ,startRandom,context));
+                it=woodlandMansionStarts_.emplace(key,std::move(created)).first;
+            }
+            auto& start=*it->second;
+            if(start.sizeable && start.bounds.intersects(clip))
+                mc112::WoodlandMansionStructure::place(
+                    start,context,populationRandom,clip);
+        }
+    }
     return result;
 }
 

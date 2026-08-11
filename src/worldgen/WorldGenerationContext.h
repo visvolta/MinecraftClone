@@ -6,7 +6,10 @@
 
 #include <cstddef>
 #include <functional>
+#include <cstdint>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 
 class Chunk;
 
@@ -21,6 +24,9 @@ public:
         std::function<mc::content::BlockState(int, int, int)>;
     using HeightSampler = std::function<int(int, int)>;
     using ClimateSampler = std::function<ClimateSample(int, int)>;
+    using StructureMobHook = std::function<void(std::string_view,int,int,int)>;
+    using StructureLootHook = std::function<void(int,int,int,std::string_view,std::int64_t)>;
+    using StructureSpawnerHook = std::function<void(int,int,int,std::string_view)>;
 
     WorldGenerationContext(
         Chunk& targetChunk,
@@ -56,6 +62,13 @@ public:
     [[nodiscard]] int getTopSolidOrLiquidBlockY(int worldX, int worldZ) const;
     [[nodiscard]] ClimateSample sampleClimate(int worldX, int worldZ) const;
 
+    void setStructureMobHook(StructureMobHook hook) { structureMobHook_ = std::move(hook); }
+    void setStructureLootHook(StructureLootHook hook) { structureLootHook_ = std::move(hook); }
+    void setStructureSpawnerHook(StructureSpawnerHook hook) { structureSpawnerHook_ = std::move(hook); }
+    void spawnStructureMob(std::string_view id,int x,int y,int z) const;
+    void assignStructureLoot(int x,int y,int z,std::string_view table,std::int64_t seed) const;
+    void assignStructureSpawner(int x,int y,int z,std::string_view entityId) const;
+
 private:
     struct FeaturePosition
     {
@@ -83,4 +96,7 @@ private:
         FeaturePositionHash
     > stagedFeatureBlocks_;
     bool isolatedFeatureActive_ = false;
+    StructureMobHook structureMobHook_;
+    StructureLootHook structureLootHook_;
+    StructureSpawnerHook structureSpawnerHook_;
 };

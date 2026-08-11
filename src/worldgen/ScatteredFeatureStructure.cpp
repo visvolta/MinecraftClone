@@ -283,7 +283,8 @@ public:
                 if(blocked(facingName)) facingName="east";
             }
             context.setBlockState(wx,wy,wz,state("chest",{{"facing",facingName}}));
-            (void)random.nextLong();
+            const auto seed=random.nextLong();
+            context.assignStructureLoot(wx,wy,wz,"minecraft:chests/desert_pyramid",seed);
         }
         return true;
     }
@@ -534,8 +535,8 @@ private:
             return false;
         setBlock(context,clip,state("dispenser", {
             {"facing",std::string(facingName)},{"triggered","false"}}),x,y,z);
-        // TileEntityDispenser#setLootTable(..., random.nextLong()).
-        (void)random.nextLong();
+        const auto seed=random.nextLong();
+        context.assignStructureLoot(wx,wy,wz,"minecraft:chests/jungle_temple_dispenser",seed);
         return true;
     }
 
@@ -596,7 +597,8 @@ private:
             if(blocked(facingName)) facingName="east";
         }
         context.setBlockState(wx,wy,wz,state("chest",{{"facing",facingName}}));
-        (void)random.nextLong();
+        const auto seed=random.nextLong();
+        context.assignStructureLoot(wx,wy,wz,"minecraft:chests/jungle_temple",seed);
         return true;
     }
 };
@@ -755,11 +757,8 @@ public:
                     if(nbt.string("metadata") != "chest")
                         return;
                     context.setBlockState(x, y, z, state("air"));
-                    // TileEntityChest#setLootTable(..., random.nextLong()).
-                    // The block-only generation context cannot persist the loot
-                    // table yet, but the exact population RNG advancement is
-                    // retained so all following features remain aligned.
-                    (void)random.nextLong();
+                    const auto seed=random.nextLong();
+                    context.assignStructureLoot(x,y,z,"minecraft:chests/igloo_chest",seed);
                 });
         }
         else

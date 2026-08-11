@@ -38,6 +38,8 @@ struct TemplatePaletteEntry
     std::vector<std::pair<std::string,std::string>> properties;
 };
 
+enum class Mirror : std::uint8_t { None, LeftRight, FrontBack };
+
 using TemplateMarkerHandler = std::function<void(
     int, int, int, const TemplateNbt&, Rotation)>;
 
@@ -56,15 +58,16 @@ public:
     // vanilla origin shift used by fossils and other template structures.
     [[nodiscard]] std::array<int,3> transformedSize(Rotation rotation) const noexcept;
     [[nodiscard]] std::array<int,3> transformedBlockPosition(
-        int x,int y,int z,Rotation rotation) const noexcept;
+        int x,int y,int z,Rotation rotation, Mirror mirror=Mirror::None) const noexcept;
     [[nodiscard]] std::array<int,3> getZeroPositionWithTransform(
-        int x,int y,int z,Rotation rotation) const noexcept;
-    [[nodiscard]] Box transformedBox(int originX,int originY,int originZ,Rotation rotation) const noexcept;
+        int x,int y,int z,Rotation rotation, Mirror mirror=Mirror::None) const noexcept;
+    [[nodiscard]] Box transformedBox(int originX,int originY,int originZ,Rotation rotation, Mirror mirror=Mirror::None) const noexcept;
 
     void place(WorldGenerationContext&,int originX,int originY,int originZ,Rotation rotation,
                const Box& clip,float integrity=1.0f,JavaRandom* random=nullptr,
                bool ignoreStructureBlocks=true,
-               const TemplateMarkerHandler& markerHandler={}) const;
+               const TemplateMarkerHandler& markerHandler={},
+               Mirror mirror=Mirror::None) const;
 };
 
 class StructureTemplateLibrary

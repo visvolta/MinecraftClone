@@ -231,3 +231,11 @@ ClimateSample WorldGenerationContext::sampleClimate(
         targetChunk_.getHumidity(localX, localZ),
         targetChunk_.getBiome(localX, localZ)};
 }
+
+
+void WorldGenerationContext::spawnStructureMob(std::string_view id,int x,int y,int z) const
+{ if(structureMobHook_) structureMobHook_(id,x,y,z); }
+void WorldGenerationContext::assignStructureLoot(int x,int y,int z,std::string_view table,std::int64_t seed) const
+{ if(structureLootHook_) structureLootHook_(x,y,z,table,seed); }
+void WorldGenerationContext::assignStructureSpawner(int x,int y,int z,std::string_view entityId) const
+{ if(structureSpawnerHook_) structureSpawnerHook_(x,y,z,entityId); }

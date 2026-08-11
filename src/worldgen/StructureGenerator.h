@@ -1,10 +1,18 @@
 #pragma once
 
 #include "worldgen/Biome.h"
+#include "worldgen/MineshaftStructure.h"
+#include "worldgen/VillageStructure.h"
+#include "worldgen/StrongholdStructure.h"
+#include "worldgen/ScatteredFeatureStructure.h"
+#include "worldgen/OceanMonumentStructure.h"
+#include "worldgen/WoodlandMansionStructure.h"
 
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <memory>
+#include <unordered_map>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -12,6 +20,7 @@
 class Chunk;
 class JavaRandom;
 class WorldGenerationContext;
+
 
 enum class WorldStructure : std::uint8_t
 {
@@ -57,6 +66,16 @@ public:
 private:
     std::int64_t worldSeed_ = 0;
     std::vector<std::pair<int, int>> strongholdChunks_;
+
+    // MapGenStructure owns persistent StructureStart instances. Keep the same
+    // start object across neighbouring population passes so component-local
+    // state (ground height, generated chests/spawners, etc.) is not reset.
+    mutable std::unordered_map<std::uint64_t,std::shared_ptr<mc112::MineshaftStructure::Start>> mineshaftStarts_;
+    mutable std::unordered_map<std::uint64_t,std::shared_ptr<mc112::VillageStructure::Start>> villageStarts_;
+    mutable std::unordered_map<std::uint64_t,std::shared_ptr<mc112::StrongholdStructure::Start>> strongholdStarts_;
+    mutable std::unordered_map<std::uint64_t,std::shared_ptr<mc112::ScatteredFeatureStructure::Start>> scatteredStarts_;
+    mutable std::unordered_map<std::uint64_t,std::shared_ptr<mc112::OceanMonumentStructure::Start>> oceanMonumentStarts_;
+    mutable std::unordered_map<std::uint64_t,std::shared_ptr<mc112::WoodlandMansionStructure::Start>> woodlandMansionStarts_;
 
     [[nodiscard]] bool isVillageChunk(int,int) const;
     [[nodiscard]] bool isTempleChunk(int,int) const;

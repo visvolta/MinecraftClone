@@ -1,4 +1,3 @@
-
 cmake_minimum_required(VERSION 3.20)
 
 project(MinecraftClone VERSION 0.1.0 LANGUAGES C CXX)
@@ -11,11 +10,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# This is a real-time game and the normal Windows workflow launches
-# build/Debug/MinecraftClone.exe. Fully unoptimized voxel lighting/meshing can
-# turn a bounded chunk job into a 100+ ms frame, so retain debug symbols while
-# optimizing game code in Debug as well. This can be disabled when stepping
-# through generated assembly is specifically required.
 option(MINECRAFT_CLONE_OPTIMIZE_DEBUG
        "Enable optimized game code in Debug builds" ON)
 if(MINECRAFT_CLONE_OPTIMIZE_DEBUG)
@@ -35,9 +29,6 @@ endif()
 
 include(FetchContent)
 find_package(Threads REQUIRED)
-
-# GLAD 2 uses Python/Jinja2 to generate its loader. Fail early with a clear
-# message instead of producing an obscure MSBuild custom-command error.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} -c "import jinja2"
@@ -52,7 +43,6 @@ if(NOT MINECRAFT_CLONE_JINJA2_RESULT EQUAL 0)
     )
 endif()
 
-# Keep dependency builds small.
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -73,8 +63,6 @@ FetchContent_Declare(
     GIT_TAG 1.0.1
     GIT_SHALLOW TRUE
 )
-
-# GLAD 2 generates the OpenGL loader during CMake configuration.
 
 FetchContent_Declare(
     imgui
@@ -106,9 +94,6 @@ glad_add_library(
     API gl:core=3.3
 )
 
-# Release 1.12 migration modules. These targets establish a stable dependency
-# direction for future content packs and compiled mods while the legacy game
-# systems are moved out of the executable incrementally.
 add_library(minecraft_core STATIC
     src/core/ResourceLocation.cpp
 )
@@ -195,6 +180,17 @@ add_library(minecraft_world STATIC
     src/worldgen/PopulationGenerator.cpp
     src/worldgen/RavineGenerator.cpp
     src/worldgen/StructureGenerator.cpp
+    src/worldgen/EndCityStructure.cpp
+    src/worldgen/FossilGenerator.cpp
+    src/worldgen/MineshaftStructure.cpp
+    src/worldgen/OceanMonumentStructure.cpp
+    src/worldgen/ScatteredFeatureStructure.cpp
+    src/worldgen/StrongholdStructure.cpp
+    src/worldgen/StructurePrimitives.cpp
+    src/worldgen/StructureTemplate.cpp
+    src/worldgen/Vanilla112State.cpp
+    src/worldgen/VillageStructure.cpp
+    src/worldgen/WoodlandMansionStructure.cpp
     src/worldgen/WorldGenerationContext.cpp
     src/worldgen/Biome.cpp
     src/worldgen/BiomeMap.cpp
@@ -210,7 +206,6 @@ target_link_libraries(minecraft_world PUBLIC
     minecraft_content
     glm::glm
 )
-
 
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -279,8 +274,6 @@ set(MINECRAFT_CLONE_SOURCES
 
 add_executable(MinecraftClone ${MINECRAFT_CLONE_SOURCES})
 
-# GLFW must not include the platform OpenGL header (GL/gl.h). GLAD owns all
-# OpenGL declarations and must be the only OpenGL loader in the project.
 target_compile_definitions(MinecraftClone PRIVATE
     GLFW_INCLUDE_NONE
     MINECRAFT_CLONE_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"

@@ -4,6 +4,9 @@
 #include "Chunk.h"
 #include "worldgen/BiomeMap.h"
 #include "worldgen/JavaRandom.h"
+#include "worldgen/MineshaftStructure.h"
+#include "worldgen/ScatteredFeatureStructure.h"
+#include "worldgen/StructurePrimitives.h"
 #include "worldgen/WorldGenerationContext.h"
 
 #include <algorithm>
@@ -87,6 +90,14 @@ bool monumentWaterBiome(BiomeId b)
 bool mansionBiome(BiomeId b)
 {
     return b==VanillaBiomes::RoofedForest||b==VanillaBiomes::RoofedForestMountains;
+}
+
+bool mesaBiome(BiomeId b)
+{
+    return b==VanillaBiomes::Mesa||b==VanillaBiomes::MesaPlateauF||
+           b==VanillaBiomes::MesaPlateau||b==VanillaBiomes::MesaBryce||
+           b==VanillaBiomes::MesaPlateauFMountains||
+           b==VanillaBiomes::MesaPlateauMountains;
 }
 
 bool areGenerationBiomesViable(std::int64_t seed,int blockX,int blockZ,int radius,
@@ -200,7 +211,13 @@ bool StructureGenerator::isWoodlandMansionChunk(int x,int z) const
 bool StructureGenerator::isStrongholdChunk(int x,int z) const
 {return std::find(strongholdChunks_.begin(),strongholdChunks_.end(),std::pair{x,z})!=strongholdChunks_.end();}
 bool StructureGenerator::isMineshaftChunk(int x,int z) const
-{JavaRandom r=mapGenRandom(worldSeed_,x,z);return r.nextDouble()<0.004&&r.nextInt(80)<std::max(std::abs(x),std::abs(z));}
+{
+    JavaRandom r=mapGenRandom(worldSeed_,x,z);
+    // MapGenStructure::recursiveGenerate advances once before canSpawn.
+    (void)r.nextInt();
+    return r.nextDouble()<0.004&&
+           r.nextInt(80)<std::max(std::abs(x),std::abs(z));
+}
 bool StructureGenerator::villageBiomeViable(int x,int z) const
 {return areGenerationBiomesViable(worldSeed_,x*16+8,z*16+8,0,villageBiome);}
 bool StructureGenerator::monumentBiomeViable(int x,int z) const
@@ -209,67 +226,86 @@ bool StructureGenerator::monumentBiomeViable(int x,int z) const
 bool StructureGenerator::mansionBiomeViable(int x,int z) const
 {return areGenerationBiomesViable(worldSeed_,x*16+8,z*16+8,32,mansionBiome);}
 
-void StructureGenerator::populate(Chunk& target,WorldGenerationContext& c) const
+PopulationStructureResult StructureGenerator::populateSource(
+    WorldGenerationContext& context,
+    JavaRandom& populationRandom,
+    int sourceChunkX,
+    int sourceChunkZ) const
 {
-    // Replay starts that can intersect the immutable target chunk. Piece
-    // layouts below remain the clone's procedural stand-ins until a 1.12 NBT
-    // structure-template/piece serialization layer is available.
-    for(int sx=target.getChunkX()-4;sx<=target.getChunkX()+4;++sx)
-    for(int sz=target.getChunkZ()-4;sz<=target.getChunkZ()+4;++sz)
+    PopulationStructureResult result;
+    const mc112::Box clip{
+        sourceChunkX * 16 + 8,
+        1,
+        sourceChunkZ * 16 + 8,
+        sourceChunkX * 16 + 23,
+        512,
+        sourceChunkZ * 16 + 23};
+
+    // MapGenBase has range=8. Recreate exactly the prepared starts that can
+    // exist in this population pass, then post-process only pieces intersecting
+    // the vanilla +8 clipping box. Start construction uses MapGenStructure's
+    // independent Random; piece placement consumes `populationRandom`.
+    for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
     {
-        const ClimateSample climate=c.sampleClimate(sx*16+8,sz*16+8);
-        JavaRandom r=mapGenRandom(worldSeed_,sx,sz);
-        if(isMineshaftChunk(sx,sz)){c.beginIsolatedFeature();generateMineshaft(c,r,sx,sz);c.finishIsolatedFeature(true);}
-        if(isVillageChunk(sx,sz)&&villageBiomeViable(sx,sz)){c.beginIsolatedFeature();generateVillage(c,r,sx,sz,climate.biome);c.finishIsolatedFeature(true);}
-        if(isStrongholdChunk(sx,sz)){c.beginIsolatedFeature();generateStronghold(c,r,sx,sz);c.finishIsolatedFeature(true);}
-        if(isTempleChunk(sx,sz)&&templeBiome(climate.biome)){c.beginIsolatedFeature();generateTemple(c,r,sx,sz,climate.biome);c.finishIsolatedFeature(true);}
-        if(isOceanMonumentChunk(sx,sz)&&monumentBiomeViable(sx,sz)){c.beginIsolatedFeature();generateOceanMonument(c,r,sx,sz);c.finishIsolatedFeature(true);}
-        if(isWoodlandMansionChunk(sx,sz)&&mansionBiomeViable(sx,sz)){c.beginIsolatedFeature();generateWoodlandMansion(c,r,sx,sz);c.finishIsolatedFeature(true);}
+        for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
+        {
+            JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+            (void)startRandom.nextInt();
+            if(!(startRandom.nextDouble()<0.004 &&
+                 startRandom.nextInt(80)<
+                    std::max(std::abs(startX),std::abs(startZ))))
+                continue;
+
+            const BiomeId biome=context.sampleClimate(
+                startX*16+8,startZ*16+8).biome;
+            const auto type=mesaBiome(biome)
+                ? mc112::MineshaftStructure::Type::Mesa
+                : mc112::MineshaftStructure::Type::Normal;
+            auto start=mc112::MineshaftStructure::create(
+                startX,startZ,type,startRandom,63);
+            if(start.sizeable && start.bounds.intersects(clip))
+            {
+                mc112::MineshaftStructure::place(
+                    start,context,populationRandom,clip);
+            }
+        }
     }
+
+    // Village and stronghold occur before scattered features in
+    // ChunkGeneratorOverworld::populate. Their exact piece ports are not wired
+    // yet, so they intentionally emit no guessed geometry here. Scattered
+    // features below use the exact MapGenScatteredFeature spacing/start RNG and
+    // exact ports for the piece kinds that are implemented.
+    for(int startX=sourceChunkX-8;startX<=sourceChunkX+8;++startX)
+    {
+        for(int startZ=sourceChunkZ-8;startZ<=sourceChunkZ+8;++startZ)
+        {
+            if(!isTempleChunk(startX,startZ))
+                continue;
+            const BiomeId biome=context.sampleClimate(
+                startX*16+8,startZ*16+8).biome;
+            if(!templeBiome(biome))
+                continue;
+
+            JavaRandom startRandom=mapGenRandom(worldSeed_,startX,startZ);
+            // MapGenStructure::recursiveGenerate advances the mapgen RNG before
+            // canSpawnStructureAtCoords. The scattered spawn test itself uses
+            // World#setRandomSeed, so it consumes no draws from startRandom.
+            (void)startRandom.nextInt();
+            auto start=mc112::ScatteredFeatureStructure::create(
+                startX,startZ,biome,startRandom);
+            if(start.sizeable && start.bounds.intersects(clip))
+            {
+                mc112::ScatteredFeatureStructure::place(
+                    start,context,populationRandom,clip);
+            }
+        }
+    }
+
+    // Ocean monument and woodland mansion post-processing still wait for
+    // their exact 1.12.2 piece/template ports. No approximation is emitted.
+    return result;
 }
-
-void StructureGenerator::generateMineshaft(WorldGenerationContext& c,JavaRandom& r,int cx,int cz) const
-{
-    const int x=cx*16+8,z=cz*16+8,y=18+r.nextInt(28);hollow(c,x-3,y,z-3,x+3,y+3,z+3,BlockType::OakPlanks);
-    for(int d=0;d<4;++d){const int dx=d==0?1:d==1?-1:0,dz=d==2?1:d==3?-1:0;const int len=18+r.nextInt(23);
-    for(int s=4;s<=len;++s){const int px=x+dx*s,pz=z+dz*s;fill(c,px-(dz!=0),y,pz-(dx!=0),px+(dz!=0),y+2,pz+(dx!=0),BlockType::Air);
-    if(s%5==0){if(dx){fill(c,px,y,pz-2,px,y+2,pz-2,BlockType::OakLog);fill(c,px,y,pz+2,px,y+2,pz+2,BlockType::OakLog);}else{fill(c,px-2,y,pz,px-2,y+2,pz,BlockType::OakLog);fill(c,px+2,y,pz,px+2,y+2,pz,BlockType::OakLog);}}}}
-}
-
-void StructureGenerator::generateVillage(WorldGenerationContext& c,JavaRandom& r,int cx,int cz,BiomeId biome) const
-{
-    const int x=cx*16+8,z=cz*16+8,y=c.getHeightValue(x,z);const BlockType wall=biome==VanillaBiomes::Desert?BlockType::Sandstone:(biome==VanillaBiomes::Taiga?BlockType::SprucePlanks:(biome==VanillaBiomes::Savanna?BlockType::AcaciaPlanks:BlockType::OakPlanks));
-    fill(c,x-2,y-1,z-2,x+2,y,z+2,BlockType::Cobblestone);fill(c,x-1,y,z-1,x+1,y+2,z+1,BlockType::Water);
-    for(int yy=y+1;yy<=y+4;++yy)for(auto [dx,dz]:{std::pair{-2,-2},std::pair{2,-2},std::pair{-2,2},std::pair{2,2}})c.setBlock(x+dx,yy,z+dz,wall);
-    fill(c,x-2,y+4,z-2,x+2,y+4,z+2,wall);
-    for(int d=-24;d<=24;++d){int gy=c.getHeightValue(x+d,z);c.setBlock(x+d,gy-1,z,biome==VanillaBiomes::Desert?BlockType::Sandstone:BlockType::Gravel);gy=c.getHeightValue(x,z+d);c.setBlock(x,gy-1,z+d,biome==VanillaBiomes::Desert?BlockType::Sandstone:BlockType::Gravel);}
-    const int houses=4+r.nextInt(5);for(int i=0;i<houses;++i){const int px=x+(i%2?12:-16)+(i/2)*4,pz=z+(i%2?-14:10);const int py=c.getHeightValue(px,pz);hollow(c,px,py,pz,px+7,py+4,pz+5,wall);c.setBlock(px+3,py+1,pz,BlockType::Air);c.setBlock(px+3,py+2,pz,BlockType::Air);}
-}
-
-void StructureGenerator::generateTemple(WorldGenerationContext& c,JavaRandom&,int cx,int cz,BiomeId biome) const
-{
-    const int x=cx*16,z=cz*16,y=c.getHeightValue(x+8,z+8);
-    if(biome==VanillaBiomes::Desert||biome==VanillaBiomes::DesertHills){for(int l=0;l<4;++l)fill(c,x-2+l,y+l,z-2+l,x+18-l,y+l,z+18-l,BlockType::Sandstone);hollow(c,x+3,y+1,z+3,x+13,y+8,z+13,BlockType::Sandstone);fill(c,x+8,y-10,z+8,x+8,y-1,z+8,BlockType::Air);c.setBlock(x+8,y-10,z+8,BlockType::TNT);}
-    else if(biome==VanillaBiomes::Jungle||biome==VanillaBiomes::JungleHills){hollow(c,x+2,y,z+1,x+13,y+7,z+15,BlockType::MossyCobblestone);fill(c,x+4,y-4,z+4,x+11,y-1,z+12,BlockType::MossyCobblestone);}
-    else if(biome==VanillaBiomes::Swampland){const int fy=y+3;fill(c,x+2,fy,z+2,x+8,fy,z+8,BlockType::OakPlanks);hollow(c,x+2,fy+1,z+2,x+8,fy+4,z+8,BlockType::OakPlanks);for(auto [dx,dz]:{std::pair{2,2},std::pair{8,2},std::pair{2,8},std::pair{8,8}})fill(c,x+dx,y-3,z+dz,x+dx,fy+2,z+dz,BlockType::OakLog);}
-    else {for(int dx=-4;dx<=4;++dx)for(int dz=-4;dz<=4;++dz)if(dx*dx+dz*dz<=16)c.setBlock(x+8+dx,y,z+8+dz,BlockType::Snow);}
-}
-
-void StructureGenerator::generateStronghold(WorldGenerationContext& c,JavaRandom& r,int cx,int cz) const
-{
-    const int x=cx*16+2,z=cz*16+2,y=20+r.nextInt(20);hollow(c,x-4,y-1,z-4,x+4,y+4,z+4,BlockType::StoneBricks);
-    for(int d=0;d<4;++d){const int dx=d==0?1:d==1?-1:0,dz=d==2?1:d==3?-1:0;for(int s=4;s<28;++s){const int px=x+dx*s,pz=z+dz*s;fill(c,px-(dz!=0),y,pz-(dx!=0),px+(dz!=0),y+2,pz+(dx!=0),BlockType::Air);}}
-    const int px=x+30;hollow(c,px-6,y-1,z-5,px+7,y+6,z+5,BlockType::StoneBricks);for(int dx=-5;dx<=5;dx+=2){fill(c,px+dx,y,z-4,px+dx,y+4,z-4,BlockType::Bookshelf);fill(c,px+dx,y,z+4,px+dx,y+4,z+4,BlockType::Bookshelf);}
-}
-
-void StructureGenerator::generateOceanMonument(WorldGenerationContext& c,JavaRandom&,int cx,int cz) const
-{
-    const int x=cx*16-21,z=cz*16-21,y=39;fill(c,x,y,z,x+57,y+2,z+57,BlockType::StoneBricks);for(int tier=0;tier<4;++tier){const int in=tier*6,top=y+8+tier*5;hollow(c,x+in,y+3,z+in,x+57-in,top,z+57-in,BlockType::StoneBricks);fill(c,x+in+2,y+4,z+in+2,x+55-in,top-1,z+55-in,BlockType::Water);}}
-
-void StructureGenerator::generateWoodlandMansion(WorldGenerationContext& c,JavaRandom& r,int cx,int cz) const
-{
-    const int x=cx*16-16,z=cz*16-12,y=c.getHeightValue(cx*16+8,cz*16+8);fill(c,x,y-2,z,x+39,y-1,z+29,BlockType::Cobblestone);
-    for(int f=0;f<3;++f){const int fy=y+f*7;fill(c,x,fy,z,x+39,fy,z+29,BlockType::DarkOakPlanks);hollow(c,x,fy+1,z,x+39,fy+6,z+29,BlockType::DarkOakPlanks);for(int rx=10;rx<39;rx+=10)fill(c,x+rx,fy+1,z+1,x+rx,fy+5,z+28,BlockType::DarkOakPlanks);if(r.nextBoolean())fill(c,x+4,fy+1,z+4,x+8,fy+4,z+4,BlockType::Bookshelf);}}
 
 std::optional<StructureLocation> StructureGenerator::findNearest(
     WorldStructure s,int blockX,int blockZ,int maxRadius,const ClimateSampler& climate) const

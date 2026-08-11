@@ -1,8 +1,23 @@
 #include "Chunk.h"
 
+#include "content/ContentCatalog.h"
+
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_map>
+
+namespace
+{
+bool stateIsSolid(mc::content::BlockState state) noexcept
+{
+    if (const auto* catalog = mc::content::ContentCatalog::active())
+    {
+        if (const auto* definition = catalog->block(state))
+            return definition->behaviour.traits.solid;
+    }
+    return isSolid(state.block());
+}
+}
 
 Chunk::Chunk(int chunkX, int chunkZ) : chunkX(chunkX), chunkZ(chunkZ)
 {
@@ -283,9 +298,9 @@ void Chunk::updateHeightmaps(
             return;
         for (int scan = y - 1; scan >= 0; --scan)
         {
-            const BlockType block = getBlock(x, scan, z);
-            if ((!solidOnly && block != BlockType::Air) ||
-                (solidOnly && isSolid(block)))
+            const mc::content::BlockState state = getBlockState(x, scan, z);
+            if ((!solidOnly && !state.isAir()) ||
+                (solidOnly && stateIsSolid(state)))
             {
                 heights[column] = static_cast<std::uint16_t>(scan + 1);
                 return;
@@ -302,8 +317,8 @@ void Chunk::updateHeightmaps(
     );
     update(
         motionBlockingHeight,
-        isSolid(oldState.block()),
-        isSolid(newState.block()),
+        stateIsSolid(oldState),
+        stateIsSolid(newState),
         true
     );
 }

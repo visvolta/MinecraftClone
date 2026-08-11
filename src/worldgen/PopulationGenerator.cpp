@@ -11,14 +11,18 @@
 #include "worldgen/ClayGenerator.h"
 #include "worldgen/DecorationGenerator.h"
 #include "worldgen/DungeonGenerator.h"
+#include "worldgen/FossilGenerator.h"
 #include "worldgen/JavaRandom.h"
 #include "worldgen/LakeGenerator.h"
 #include "worldgen/MinableGenerator.h"
 #include "worldgen/OreGenerator.h"
+#include "worldgen/StructureGenerator.h"
 #include "worldgen/TreeGenerator.h"
+#include "worldgen/Vanilla112State.h"
 #include "worldgen/WorldGenerationContext.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -206,6 +210,22 @@ bool sameRuntimeBlock(
     return first.blockRuntimeId() == second.blockRuntimeId();
 }
 
+bool isVanillaStoneBlock(mc::content::BlockState state) noexcept
+{
+    if (state.block() == BlockType::Stone) return true;
+    const std::string_view p = mc112::path(state);
+    return p == "stone" || p == "granite" || p == "polished_granite" ||
+           p == "diorite" || p == "polished_diorite" ||
+           p == "andesite" || p == "polished_andesite";
+}
+
+bool isVanillaDirtBlock(mc::content::BlockState state) noexcept
+{
+    if (state.block() == BlockType::Dirt) return true;
+    const std::string_view p = mc112::path(state);
+    return p == "dirt" || p == "coarse_dirt" || p == "podzol";
+}
+
 void generateSpring(
     WorldGenerationContext& context,
     BlockType liquid,
@@ -213,12 +233,15 @@ void generateSpring(
     int y,
     int z)
 {
-    if (context.getBlock(x, y + 1, z) != BlockType::Stone ||
-        context.getBlock(x, y - 1, z) != BlockType::Stone)
+    // WorldGenLiquids compares the Block object to Blocks.STONE. In 1.12.2
+    // every stone metadata variant is the same block, so the split resource
+    // catalog must treat all seven variants as that block here.
+    if (!isVanillaStoneBlock(context.getBlockState(x, y + 1, z)) ||
+        !isVanillaStoneBlock(context.getBlockState(x, y - 1, z)))
         return;
 
-    const BlockType current = context.getBlock(x, y, z);
-    if (current != BlockType::Air && current != BlockType::Stone)
+    const auto current = context.getBlockState(x, y, z);
+    if (!mc112::isAir(current) && !isVanillaStoneBlock(current))
         return;
 
     int stone = 0;
@@ -227,42 +250,62 @@ void generateSpring(
              std::pair{-1, 0}, std::pair{1, 0},
              std::pair{0, -1}, std::pair{0, 1}})
     {
-        const BlockType block = context.getBlock(x + dx, y, z + dz);
-        if (block == BlockType::Stone) ++stone;
-        if (block == BlockType::Air) ++air;
+        const auto block = context.getBlockState(x + dx, y, z + dz);
+        if (isVanillaStoneBlock(block)) ++stone;
+        if (mc112::isAir(block)) ++air;
     }
     if (stone == 3 && air == 1)
         context.setBlock(x, y, z, liquid);
 }
 
-bool consumeDoublePlantGenerator(
+bool generateDoublePlant(
     WorldGenerationContext& context,
     JavaRandom& random,
+    std::string_view variant,
     int x,
     int y,
     int z)
 {
-    // WorldGenDoublePlant performs 64 scatter attempts. The current legacy
-    // block enum has no double-plant state, but placement viability is still
-    // evaluated so BiomeForest's retry/break behavior consumes the right RNG.
+    // WorldGenDoublePlant::generate: 64 scatter attempts. BlockDoublePlant
+    // inherits BlockBush, so the lower half requires grass/dirt/farmland and
+    // the upper position must be air. The dirt test intentionally includes
+    // all 1.12 dirt variants because vanilla checks the block, not metadata.
     bool generated = false;
+    const std::array<mc112::Property, 2> lowerProperties{{
+        {"variant", std::string(variant)}, {"half", "lower"}}};
+    const std::array<mc112::Property, 2> upperProperties{{
+        {"variant", std::string(variant)}, {"half", "upper"}};
+    const auto lowerState = mc112::vanilla112State(
+        "minecraft:double_plant", lowerProperties);
+    const auto upperState = mc112::vanilla112State(
+        "minecraft:double_plant", upperProperties);
+
     for (int attempt = 0; attempt < 64; ++attempt)
     {
         const int px = x + random.nextInt(8) - random.nextInt(8);
         const int py = y + random.nextInt(4) - random.nextInt(4);
         const int pz = z + random.nextInt(8) - random.nextInt(8);
-        if (py <= 0 || py >= Chunk::HEIGHT - 1)
+        if (py <= 0 || py >= Chunk::HEIGHT - 2)
             continue;
-        if (context.getBlockState(px, py, pz).isAir() &&
-            context.getBlockState(px, py + 1, pz).isAir())
-        {
-            const BlockType below = context.getBlock(px, py - 1, pz);
-            if (below == BlockType::Grass ||
-                below == BlockType::Dirt ||
-                below == BlockType::Farmland ||
-                below == BlockType::Podzol)
-                generated = true;
-        }
+        if (!mc112::isAir(context.getBlockState(px, py, pz)) ||
+            !mc112::isAir(context.getBlockState(px, py + 1, pz)))
+            continue;
+
+        const auto below = context.getBlockState(px, py - 1, pz);
+        const std::string_view soil = mc112::path(below);
+        const bool canSustain =
+            below.block() == BlockType::Grass ||
+            below.block() == BlockType::Dirt ||
+            below.block() == BlockType::Farmland ||
+            soil == "grass" || soil == "grass_block" ||
+            soil == "dirt" || soil == "coarse_dirt" || soil == "podzol" ||
+            soil == "farmland";
+        if (!canSustain)
+            continue;
+
+        context.setBlockState(px, py, pz, lowerState);
+        context.setBlockState(px, py + 1, pz, upperState);
+        generated = true;
     }
     return generated;
 }
@@ -468,7 +511,7 @@ bool generateSandPatch(
 {
     // WorldGenSand: water-only start, radius random(radius-2)+2, replace
     // dirt/grass in a five-block-thick disk.
-    if (context.getBlock(x, y, z) != BlockType::Water)
+    if (!mc112::isWater(context.getBlockState(x, y, z)))
         return false;
 
     const int radius = random.nextInt(configuredRadius - 2) + 2;
@@ -483,8 +526,11 @@ bool generateSandPatch(
 
             for (int py = y - 2; py <= y + 2; ++py)
             {
-                const BlockType current = context.getBlock(px, py, pz);
-                if (current == BlockType::Dirt || current == BlockType::Grass)
+                const auto current = context.getBlockState(px, py, pz);
+                if (isVanillaDirtBlock(current) ||
+                    current.block() == BlockType::Grass ||
+                    mc112::path(current) == "grass" ||
+                    mc112::path(current) == "grass_block")
                     context.setBlock(px, py, pz, replacement);
             }
         }
@@ -492,30 +538,79 @@ bool generateSandPatch(
     return true;
 }
 
-BlockType pickFlowerForBiome(
+mc::content::BlockState flowerState(std::string_view type)
+{
+    if (type == "houstonia") return mc112::state("azure_bluet");
+    return mc112::state(type);
+}
+
+bool canSustainVanillaBush(mc::content::BlockState below) noexcept
+{
+    const std::string_view soil = mc112::path(below);
+    return below.block() == BlockType::Grass ||
+           below.block() == BlockType::Dirt ||
+           below.block() == BlockType::Farmland ||
+           soil == "grass" || soil == "grass_block" ||
+           soil == "dirt" || soil == "coarse_dirt" ||
+           soil == "podzol" || soil == "farmland";
+}
+
+void generateFlowerPatch(
+    WorldGenerationContext& context,
+    JavaRandom& random,
+    mc::content::BlockState flower,
+    int x,
+    int y,
+    int z)
+{
+    // WorldGenFlowers::generate. Overworld has a sky, so only the vanilla
+    // y<255 limit applies in addition to BlockBush::canBlockStay.
+    for (int attempt = 0; attempt < 64; ++attempt)
+    {
+        const int px = x + random.nextInt(8) - random.nextInt(8);
+        const int py = y + random.nextInt(4) - random.nextInt(4);
+        const int pz = z + random.nextInt(8) - random.nextInt(8);
+        if (py <= 0 || py >= 255)
+            continue;
+        if (mc112::isAir(context.getBlockState(px, py, pz)) &&
+            canSustainVanillaBush(context.getBlockState(px, py - 1, pz)))
+            context.setBlockState(px, py, pz, flower);
+    }
+}
+
+mc::content::BlockState pickFlowerForBiome(
     JavaRandom& random,
     BiomeId biome,
     int x,
     int z)
 {
-    // The legacy enum only has dandelion/poppy, but consume each biome's
-    // exact picker RNG so all following features retain vanilla positions.
+    // BiomeSwamp::pickRandomFlower.
     if (biome == VanillaBiomes::Swampland ||
         biome == VanillaBiomes::SwamplandMountains)
-        return BlockType::Rose; // blue orchid fallback
+        return flowerState("blue_orchid");
 
+    // BiomeForest(FLOWER)::pickRandomFlower. EnumFlowerType.values() order is
+    // DANDELION, POPPY, BLUE_ORCHID, ALLIUM, HOUSTONIA, four tulips, OXEYE.
+    // BLUE_ORCHID is replaced with POPPY in flower forests.
     if (biome == VanillaBiomes::FlowerForest)
     {
+        static constexpr std::array<std::string_view, 10> flowers{{
+            "dandelion", "poppy", "blue_orchid", "allium", "houstonia",
+            "red_tulip", "orange_tulip", "white_tulip", "pink_tulip",
+            "oxeye_daisy"}};
         const double normalized = std::clamp(
             (1.0 + biomeGrassNoise().value(
                 static_cast<double>(x) / 48.0,
                 static_cast<double>(z) / 48.0)) / 2.0,
             0.0,
             0.9999);
-        const int flowerIndex = static_cast<int>(normalized * 10.0);
-        return flowerIndex == 0 ? BlockType::Dandelion : BlockType::Rose;
+        std::string_view chosen = flowers[static_cast<std::size_t>(
+            normalized * static_cast<double>(flowers.size()))];
+        if (chosen == "blue_orchid") chosen = "poppy";
+        return flowerState(chosen);
     }
 
+    // BiomePlains::pickRandomFlower, including exact Random calls/order.
     if (isPlainsClass(biome))
     {
         const double noise = biomeGrassNoise().value(
@@ -523,20 +618,23 @@ BlockType pickFlowerForBiome(
             static_cast<double>(z) / 200.0);
         if (noise < -0.8)
         {
-            (void)random.nextInt(4); // one of four tulips
-            return BlockType::Rose;
+            static constexpr std::array<std::string_view, 4> tulips{{
+                "orange_tulip", "red_tulip", "pink_tulip", "white_tulip"}};
+            return flowerState(tulips[static_cast<std::size_t>(random.nextInt(4))]);
         }
         if (random.nextInt(3) > 0)
         {
-            (void)random.nextInt(3); // poppy / houstonia / oxeye
-            return BlockType::Rose;
+            static constexpr std::array<std::string_view, 3> redFlowers{{
+                "poppy", "houstonia", "oxeye_daisy"}};
+            return flowerState(redFlowers[static_cast<std::size_t>(random.nextInt(3))]);
         }
-        return BlockType::Dandelion;
+        return flowerState("dandelion");
     }
 
+    // Biome::pickRandomFlower.
     return random.nextInt(3) > 0
-        ? BlockType::Dandelion
-        : BlockType::Rose;
+        ? flowerState("dandelion")
+        : flowerState("poppy");
 }
 
 BlockType grassForBiome(JavaRandom& random, BiomeId biome)
@@ -556,7 +654,8 @@ PopulationGenerator::PopulationGenerator(std::int64_t worldSeed)
 
 void PopulationGenerator::populate(
     Chunk& targetChunk,
-    WorldGenerationContext& context) const
+    WorldGenerationContext& context,
+    const StructureGenerator& structures) const
 {
     JavaRandom seedRandom(worldSeed_);
     const std::int64_t xMultiplier = makeOdd(seedRandom.nextLong());
@@ -565,12 +664,14 @@ void PopulationGenerator::populate(
     const LakeGenerator waterLake(BlockType::Water);
     const LakeGenerator lavaLake(BlockType::Lava);
     const DungeonGenerator dungeons;
+    const mc112::FossilGenerator fossils(worldSeed_);
     const OreGenerator ores;
     const ClayGenerator clay(4);
     const TreeGenerator trees;
     const DecorationGenerator decorations;
     const MinableGenerator mesaGold(BlockType::GoldOre, 9);
-    const MinableGenerator silverfishRngPlaceholder(BlockType::Stone, 9);
+    const MinableGenerator silverfish(
+        mc112::state("stone_monster_egg"), 9);
 
     const auto generateTree = [&context, &trees](
         JavaRandom& random,
@@ -607,8 +708,12 @@ void PopulationGenerator::populate(
                 context.sampleClimate(originX + 16, originZ + 16);
             const BiomeDefinition* biome =
                 BiomeRegistry::active().find(climate.biome);
-            const bool village = villageStarts(
-                worldSeed_, sourceChunkX, sourceChunkZ);
+            // ChunkGeneratorOverworld::populate runs all MapGenStructure
+            // post-processing first with this exact same Random.
+            const PopulationStructureResult structureResult =
+                structures.populateSource(
+                    context, random, sourceChunkX, sourceChunkZ);
+            const bool village = structureResult.villageGenerated;
 
             // ChunkGeneratorOverworld::populate after structure postprocess.
             if (climate.biome != VanillaBiomes::Desert &&
@@ -665,8 +770,8 @@ void PopulationGenerator::populate(
                         if (bound > 0)
                         {
                             const int y = random.nextInt(bound);
-                            (void)consumeDoublePlantGenerator(
-                                context, random, x, y, z);
+                            (void)generateDoublePlant(
+                                context, random, "double_grass", x, y, z);
                         }
                     }
                 }
@@ -680,8 +785,8 @@ void PopulationGenerator::populate(
                         if (bound > 0)
                         {
                             const int y = random.nextInt(bound);
-                            (void)consumeDoublePlantGenerator(
-                                context, random, x, y, z);
+                            (void)generateDoublePlant(
+                                context, random, "sunflower", x, y, z);
                         }
                     }
                 }
@@ -722,7 +827,10 @@ void PopulationGenerator::populate(
                     doublePlantCount += 2;
                 for (int i = 0; i < doublePlantCount; ++i)
                 {
-                    (void)random.nextInt(3); // lilac / rose / peony
+                    static constexpr std::array<std::string_view, 3> variants{{
+                        "syringa", "double_rose", "paeonia"}};
+                    const std::string_view variant = variants[
+                        static_cast<std::size_t>(random.nextInt(3))];
                     for (int retry = 0; retry < 5; ++retry)
                     {
                         const int x = originX + random.nextInt(16) + 8;
@@ -731,8 +839,8 @@ void PopulationGenerator::populate(
                         if (bound <= 0)
                             continue;
                         const int y = random.nextInt(bound);
-                        if (consumeDoublePlantGenerator(
-                                context, random, x, y, z))
+                        if (generateDoublePlant(
+                                context, random, variant, x, y, z))
                             break;
                     }
                 }
@@ -749,8 +857,8 @@ void PopulationGenerator::populate(
                     if (bound > 0)
                     {
                         const int y = random.nextInt(bound);
-                        (void)consumeDoublePlantGenerator(
-                            context, random, x, y, z);
+                        (void)generateDoublePlant(
+                            context, random, "double_grass", x, y, z);
                     }
                 }
             }
@@ -781,8 +889,8 @@ void PopulationGenerator::populate(
                     if (bound > 0)
                     {
                         const int y = random.nextInt(bound);
-                        (void)consumeDoublePlantGenerator(
-                            context, random, x, y, z);
+                        (void)generateDoublePlant(
+                            context, random, "double_fern", x, y, z);
                     }
                 }
             }
@@ -908,10 +1016,9 @@ void PopulationGenerator::populate(
                 if (bound <= 0)
                     continue;
                 const int y = random.nextInt(bound);
-                const BlockType flower = pickFlowerForBiome(
+                const mc::content::BlockState flower = pickFlowerForBiome(
                     random, climate.biome, x, z);
-                decorations.generateFlowers(
-                    context, random, flower, x, y, z);
+                generateFlowerPatch(context, random, flower, x, y, z);
             }
 
             for (int i = 0; i < grassCount; ++i)
@@ -1137,26 +1244,27 @@ void PopulationGenerator::populate(
                     const int x = originX + random.nextInt(16);
                     const int y = random.nextInt(28) + 4;
                     const int z = originZ + random.nextInt(16);
-                    if (context.getBlock(x, y, z) == BlockType::Stone)
-                        context.setBlockState(
-                            x, y, z, namedState("emerald_ore", BlockType::Stone));
+                    if (isVanillaStoneBlock(context.getBlockState(x, y, z)))
+                        context.setBlockState(x, y, z, mc112::state("emerald_ore"));
                 }
                 for (int i = 0; i < 7; ++i)
                 {
                     const int x = originX + random.nextInt(16);
                     const int y = random.nextInt(64);
                     const int z = originZ + random.nextInt(16);
-                    silverfishRngPlaceholder.generate(
+                    silverfish.generate(
                         context, random, x, y, z);
                 }
             }
 
-            if (climate.biome == VanillaBiomes::Swampland ||
-                climate.biome == VanillaBiomes::SwamplandMountains)
+            if ((climate.biome == VanillaBiomes::Swampland ||
+                 climate.biome == VanillaBiomes::SwamplandMountains) &&
+                random.nextInt(64) == 0)
             {
-                // BiomeSwamp's 1-in-64 fossil hook. The clone currently has no
-                // fossil template loader; keep the exact chance draw here.
-                (void)random.nextInt(64);
+                // BiomeSwamp::decorate -> WorldGenFossils. WorldGenFossils
+                // intentionally ignores this population Random after the gate
+                // and creates Chunk::getRandomWithSeed(987234911L).
+                fossils.generate(context, sourceChunkX, sourceChunkZ);
             }
 
             // WorldEntitySpawner consumes RNG between biome.decorate and the

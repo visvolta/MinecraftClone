@@ -26,6 +26,11 @@ struct StructureLocation
     BiomeId biome = VanillaBiomes::Plains;
 };
 
+struct PopulationStructureResult
+{
+    bool villageGenerated = false;
+};
+
 [[nodiscard]] const char* structureName(WorldStructure structure) noexcept;
 [[nodiscard]] std::optional<WorldStructure> parseStructureName(std::string_view name) noexcept;
 
@@ -34,7 +39,17 @@ class StructureGenerator
 public:
     using ClimateSampler = std::function<ClimateSample(int, int)>;
     explicit StructureGenerator(std::int64_t worldSeed);
-    void populate(Chunk& targetChunk, WorldGenerationContext& context) const;
+
+    // 1.12.2 MapGenStructure post-processing is part of
+    // ChunkGeneratorOverworld::populate and consumes the same Random as lakes,
+    // dungeons and biome decoration. `sourceChunkX/Z` identify that population
+    // pass; the vanilla clipping box is source*16+8 .. +23.
+    [[nodiscard]] PopulationStructureResult populateSource(
+        WorldGenerationContext& context,
+        JavaRandom& populationRandom,
+        int sourceChunkX,
+        int sourceChunkZ) const;
+
     [[nodiscard]] std::optional<StructureLocation> findNearest(
         WorldStructure structure, int blockX, int blockZ,
         int maximumRegionRadius, const ClimateSampler& climateSampler) const;
@@ -52,11 +67,4 @@ private:
     [[nodiscard]] bool villageBiomeViable(int,int) const;
     [[nodiscard]] bool monumentBiomeViable(int,int) const;
     [[nodiscard]] bool mansionBiomeViable(int,int) const;
-
-    void generateMineshaft(WorldGenerationContext&,JavaRandom&,int,int) const;
-    void generateVillage(WorldGenerationContext&,JavaRandom&,int,int,BiomeId) const;
-    void generateTemple(WorldGenerationContext&,JavaRandom&,int,int,BiomeId) const;
-    void generateStronghold(WorldGenerationContext&,JavaRandom&,int,int) const;
-    void generateOceanMonument(WorldGenerationContext&,JavaRandom&,int,int) const;
-    void generateWoodlandMansion(WorldGenerationContext&,JavaRandom&,int,int) const;
 };

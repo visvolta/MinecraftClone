@@ -64,7 +64,7 @@ void TerrainGenerator::generateChunk(Chunk& chunk) const
         {
             const int chunkX = floorDivide(worldX, Chunk::WIDTH);
             const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
-            return terrainChunkAt(chunkX, chunkZ).getBlock(
+            return terrainChunkAt(chunkX, chunkZ).getBlockState(
                 positiveModulo(worldX, Chunk::WIDTH),
                 worldY,
                 positiveModulo(worldZ, Chunk::DEPTH));
@@ -82,8 +82,7 @@ void TerrainGenerator::generateChunk(Chunk& chunk) const
             return biomeMap_.sample(worldX, worldZ);
         });
 
-    structureGenerator_.populate(chunk, context);
-    populationGenerator_.populate(chunk, context);
+    populationGenerator_.populate(chunk, context, structureGenerator_);
 }
 
 void TerrainGenerator::generateTerrainOnly(Chunk& chunk) const

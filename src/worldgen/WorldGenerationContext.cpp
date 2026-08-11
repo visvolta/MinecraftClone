@@ -1,23 +1,20 @@
 #include "worldgen/WorldGenerationContext.h"
 
 #include "Chunk.h"
+#include "worldgen/Vanilla112State.h"
 
-#include <utility>
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 
 std::size_t WorldGenerationContext::FeaturePositionHash::operator()(
     const FeaturePosition& position) const noexcept
 {
-    // A stable integer mix handles negative world coordinates without
-    // relying on implementation-defined shifts.
     std::uint64_t hash = static_cast<std::uint32_t>(position.x);
     hash ^= static_cast<std::uint64_t>(
-        static_cast<std::uint32_t>(position.z)
-    ) << 32U;
+        static_cast<std::uint32_t>(position.z)) << 32U;
     hash ^= static_cast<std::uint64_t>(
-        static_cast<std::uint32_t>(position.y)
-    ) * 0x9E3779B97F4A7C15ULL;
+        static_cast<std::uint32_t>(position.y)) * 0x9E3779B97F4A7C15ULL;
     hash ^= hash >> 30U;
     hash *= 0xBF58476D1CE4E5B9ULL;
     hash ^= hash >> 27U;
@@ -27,6 +24,26 @@ std::size_t WorldGenerationContext::FeaturePositionHash::operator()(
 WorldGenerationContext::WorldGenerationContext(
     Chunk& targetChunk,
     FallbackSampler fallbackSampler,
+    HeightSampler heightSampler,
+    ClimateSampler climateSampler)
+    : WorldGenerationContext(
+        targetChunk,
+        StateFallbackSampler(
+            [fallback = std::move(fallbackSampler)](
+                int x, int y, int z) -> mc::content::BlockState
+            {
+                return fallback
+                    ? mc::content::BlockState(fallback(x, y, z))
+                    : mc::content::BlockState{};
+            }),
+        std::move(heightSampler),
+        std::move(climateSampler))
+{
+}
+
+WorldGenerationContext::WorldGenerationContext(
+    Chunk& targetChunk,
+    StateFallbackSampler fallbackSampler,
     HeightSampler heightSampler,
     ClimateSampler climateSampler)
     : targetChunk_(targetChunk),
@@ -41,6 +58,8 @@ BlockType WorldGenerationContext::getBlock(
     int worldY,
     int worldZ) const
 {
+    // Kept only for legacy generators. Resource-backed states cannot be
+    // represented by BlockType; 1.12.2-sensitive code must use getBlockState.
     return getBlockState(worldX, worldY, worldZ).block();
 }
 
@@ -50,23 +69,20 @@ mc::content::BlockState WorldGenerationContext::getBlockState(
     int worldZ) const
 {
     if (worldY < 0 || worldY >= Chunk::HEIGHT)
-    {
         return {};
-    }
 
     if (isolatedFeatureActive_)
     {
         const auto staged = stagedFeatureBlocks_.find(
-            FeaturePosition{worldX, worldY, worldZ}
-        );
+            FeaturePosition{worldX, worldY, worldZ});
         if (staged != stagedFeatureBlocks_.end())
             return staged->second;
 
-        // Population is replayed separately for every target chunk. Reading
-        // the terrain snapshot here gives every replay exactly the same
-        // validation input, including when a tree crosses a chunk boundary.
+        // Population is replayed separately for every target chunk. Read the
+        // immutable terrain snapshot here so replay validation is independent
+        // of whichever neighboring chunk happened to finish first.
         return fallbackSampler_
-            ? mc::content::BlockState(fallbackSampler_(worldX, worldY, worldZ))
+            ? fallbackSampler_(worldX, worldY, worldZ)
             : mc::content::BlockState{};
     }
 
@@ -75,12 +91,11 @@ mc::content::BlockState WorldGenerationContext::getBlockState(
         return targetChunk_.getBlockState(
             worldX - targetChunk_.getWorldOriginX(),
             worldY,
-            worldZ - targetChunk_.getWorldOriginZ()
-        );
+            worldZ - targetChunk_.getWorldOriginZ());
     }
 
     return fallbackSampler_
-        ? mc::content::BlockState(fallbackSampler_(worldX, worldY, worldZ))
+        ? fallbackSampler_(worldX, worldY, worldZ)
         : mc::content::BlockState{};
 }
 
@@ -89,8 +104,7 @@ bool WorldGenerationContext::isInsideTarget(
     int worldY,
     int worldZ) const noexcept
 {
-    return worldY >= 0 &&
-           worldY < Chunk::HEIGHT &&
+    return worldY >= 0 && worldY < Chunk::HEIGHT &&
            worldX >= targetChunk_.getWorldOriginX() &&
            worldX < targetChunk_.getWorldOriginX() + Chunk::WIDTH &&
            worldZ >= targetChunk_.getWorldOriginZ() &&
@@ -104,8 +118,7 @@ bool WorldGenerationContext::setBlock(
     BlockType block)
 {
     return setBlockState(
-        worldX, worldY, worldZ, mc::content::BlockState(block)
-    );
+        worldX, worldY, worldZ, mc::content::BlockState(block));
 }
 
 bool WorldGenerationContext::setBlockState(
@@ -119,22 +132,18 @@ bool WorldGenerationContext::setBlockState(
         if (worldY < 0 || worldY >= Chunk::HEIGHT)
             return false;
         stagedFeatureBlocks_.insert_or_assign(
-            FeaturePosition{worldX, worldY, worldZ}, state
-        );
+            FeaturePosition{worldX, worldY, worldZ}, state);
         return true;
     }
 
     if (!isInsideTarget(worldX, worldY, worldZ))
-    {
         return false;
-    }
 
     return targetChunk_.setBlockState(
         worldX - targetChunk_.getWorldOriginX(),
         worldY,
         worldZ - targetChunk_.getWorldOriginZ(),
-        state
-    );
+        state);
 }
 
 void WorldGenerationContext::beginIsolatedFeature()
@@ -155,15 +164,13 @@ void WorldGenerationContext::finishIsolatedFeature(bool commit)
                 position.x - targetChunk_.getWorldOriginX(),
                 position.y,
                 position.z - targetChunk_.getWorldOriginZ(),
-                state
-            );
+                state);
         }
     }
 
     stagedFeatureBlocks_.clear();
     isolatedFeatureActive_ = false;
 }
-
 
 int WorldGenerationContext::getHeightValue(int worldX, int worldZ) const
 {
@@ -172,11 +179,26 @@ int WorldGenerationContext::getHeightValue(int worldX, int worldZ) const
 
     for (int y = Chunk::HEIGHT - 1; y >= 0; --y)
     {
-        const BlockType block = getBlock(worldX, y, worldZ);
-        if (block != BlockType::Air && !isLiquid(block) && !isLeaf(block))
+        const mc::content::BlockState state = getBlockState(worldX, y, worldZ);
+        if (!mc112::isAir(state) && !mc112::isLiquid(state) &&
+            !mc112::isLeaf(state))
             return y + 1;
     }
 
+    return 0;
+}
+
+int WorldGenerationContext::getTopSolidOrLiquidBlockY(
+    int worldX, int worldZ) const
+{
+    // World#getTopSolidOrLiquidBlock scans downward to the first material
+    // that blocks movement, excluding leaves, and returns the block ABOVE it.
+    for(int y = Chunk::HEIGHT - 1; y >= 0; --y)
+    {
+        const auto current = getBlockState(worldX, y, worldZ);
+        if(mc112::isSolid(current) && !mc112::isLeaf(current))
+            return y + 1;
+    }
     return 0;
 }
 
@@ -194,32 +216,18 @@ ClimateSample WorldGenerationContext::sampleClimate(
     {
         const int localX = worldX - targetChunk_.getWorldOriginX();
         const int localZ = worldZ - targetChunk_.getWorldOriginZ();
-        const double temperature = targetChunk_.getTemperature(localX, localZ);
-        const double humidity = targetChunk_.getHumidity(localX, localZ);
         return {
-            temperature,
-            humidity,
-            targetChunk_.getBiome(localX, localZ)
-        };
+            targetChunk_.getTemperature(localX, localZ),
+            targetChunk_.getHumidity(localX, localZ),
+            targetChunk_.getBiome(localX, localZ)};
     }
 
-    // Population is replayed per target chunk. Outside-target climate data is
-    // not stored in the fallback sampler, so use the nearest target column.
     const int localX = std::clamp(
-        worldX - targetChunk_.getWorldOriginX(),
-        0,
-        Chunk::WIDTH - 1
-    );
+        worldX - targetChunk_.getWorldOriginX(), 0, Chunk::WIDTH - 1);
     const int localZ = std::clamp(
-        worldZ - targetChunk_.getWorldOriginZ(),
-        0,
-        Chunk::DEPTH - 1
-    );
-    const double temperature = targetChunk_.getTemperature(localX, localZ);
-    const double humidity = targetChunk_.getHumidity(localX, localZ);
+        worldZ - targetChunk_.getWorldOriginZ(), 0, Chunk::DEPTH - 1);
     return {
-        temperature,
-        humidity,
-        targetChunk_.getBiome(localX, localZ)
-    };
+        targetChunk_.getTemperature(localX, localZ),
+        targetChunk_.getHumidity(localX, localZ),
+        targetChunk_.getBiome(localX, localZ)};
 }

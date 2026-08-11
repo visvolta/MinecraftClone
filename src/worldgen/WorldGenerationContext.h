@@ -13,7 +13,12 @@ class Chunk;
 class WorldGenerationContext
 {
 public:
+    // Compatibility overload for old generators that still expose only a
+    // legacy BlockType fallback. New 1.12.2 code must use StateFallbackSampler
+    // so off-chunk reads retain variant/property data.
     using FallbackSampler = std::function<BlockType(int, int, int)>;
+    using StateFallbackSampler =
+        std::function<mc::content::BlockState(int, int, int)>;
     using HeightSampler = std::function<int(int, int)>;
     using ClimateSampler = std::function<ClimateSample(int, int)>;
 
@@ -23,12 +28,20 @@ public:
         HeightSampler heightSampler,
         ClimateSampler climateSampler
     );
+    WorldGenerationContext(
+        Chunk& targetChunk,
+        StateFallbackSampler fallbackSampler,
+        HeightSampler heightSampler,
+        ClimateSampler climateSampler
+    );
 
     [[nodiscard]] BlockType getBlock(int worldX, int worldY, int worldZ) const;
     [[nodiscard]] mc::content::BlockState getBlockState(
         int worldX, int worldY, int worldZ
     ) const;
-    [[nodiscard]] bool isInsideTarget(int worldX, int worldY, int worldZ) const noexcept;
+    [[nodiscard]] bool isInsideTarget(
+        int worldX, int worldY, int worldZ
+    ) const noexcept;
 
     bool setBlock(int worldX, int worldY, int worldZ, BlockType block);
     bool setBlockState(
@@ -40,6 +53,7 @@ public:
     void beginIsolatedFeature();
     void finishIsolatedFeature(bool commit);
     [[nodiscard]] int getHeightValue(int worldX, int worldZ) const;
+    [[nodiscard]] int getTopSolidOrLiquidBlockY(int worldX, int worldZ) const;
     [[nodiscard]] ClimateSample sampleClimate(int worldX, int worldZ) const;
 
 private:
@@ -55,14 +69,18 @@ private:
     struct FeaturePositionHash
     {
         [[nodiscard]] std::size_t operator()(
-            const FeaturePosition& position) const noexcept;
+            const FeaturePosition& position
+        ) const noexcept;
     };
 
     Chunk& targetChunk_;
-    FallbackSampler fallbackSampler_;
+    StateFallbackSampler fallbackSampler_;
     HeightSampler heightSampler_;
     ClimateSampler climateSampler_;
-    std::unordered_map<FeaturePosition, mc::content::BlockState, FeaturePositionHash>
-        stagedFeatureBlocks_;
+    std::unordered_map<
+        FeaturePosition,
+        mc::content::BlockState,
+        FeaturePositionHash
+    > stagedFeatureBlocks_;
     bool isolatedFeatureActive_ = false;
 };

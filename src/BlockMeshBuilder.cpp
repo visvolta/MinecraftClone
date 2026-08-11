@@ -535,9 +535,18 @@ int appendCrossedPlanes(
     const float brightness = ChunkMeshing::classicBrightness(
         ChunkMeshing::sampleLight(input, x, y, z)
     );
-    const glm::vec3 tint = blendedTintFor(
+    glm::vec3 tint = blendedTintFor(
         block, BlockFace::Front, input, x, z, colourMap
     );
+    if(const auto* active=mc::content::ContentCatalog::active())
+        if(const auto* definition=active->block(state))
+            if(definition->behaviour.tint==mc::content::BlockTint::Grass)
+                tint=colourMap.getGrassColor(
+                    input.snapshot->getTemperature(x,z),
+                    input.snapshot->getHumidity(x,z),
+                    input.snapshot->getBiome(x,z),
+                    input.snapshot->getWorldOriginX()+x,
+                    input.snapshot->getWorldOriginZ()+z);
     const glm::vec3 origin(
         static_cast<float>(input.snapshot->getWorldOriginX() + x) + 0.5f,
         static_cast<float>(y) + 0.5f,

@@ -110,6 +110,76 @@ std::optional<mc::content::BlockState> legacyMetadataState(
         return property(props, key, fallback);
     };
 
+    if (base == "tallgrass")
+    {
+        const std::string type = value("type", "tall_grass");
+        if (type == "fern") return mc::content::BlockState(BlockType::Fern, 0);
+        if (type == "dead_bush") return mc::content::BlockState(BlockType::DeadBush, 0);
+        if (type == "tall_grass") return mc::content::BlockState(BlockType::TallGrass, 0);
+        return std::nullopt;
+    }
+
+    if (base == "ladder")
+    {
+        static const std::unordered_map<std::string,int> facing{
+            {"north",2},{"south",3},{"west",4},{"east",5}
+        };
+        const auto it=facing.find(value("facing","north"));
+        return it==facing.end()?std::nullopt:
+            std::optional<mc::content::BlockState>(
+                mc::content::BlockState(BlockType::Ladder,
+                    static_cast<std::uint16_t>(it->second)));
+    }
+
+    if (base == "pumpkin")
+    {
+        static const std::unordered_map<std::string,int> facing{
+            {"south",0},{"west",1},{"north",2},{"east",3}
+        };
+        const auto it=facing.find(value("facing","south"));
+        return it==facing.end()?std::nullopt:
+            std::optional<mc::content::BlockState>(
+                mc::content::BlockState(BlockType::Pumpkin,
+                    static_cast<std::uint16_t>(it->second)));
+    }
+
+    if (base == "redstone_torch")
+    {
+        static const std::unordered_map<std::string,int> facing{
+            {"east",1},{"west",2},{"south",3},{"north",4},{"up",5}
+        };
+        const auto it=facing.find(value("facing","up"));
+        return it==facing.end()?std::nullopt:
+            std::optional<mc::content::BlockState>(
+                mc::content::BlockState(BlockType::RedstoneTorch,
+                    static_cast<std::uint16_t>(it->second)));
+    }
+
+    if (base == "tnt")
+    {
+        const bool explode=boolProperty(props,"explode").value_or(false);
+        return mc::content::BlockState(BlockType::TNT, explode?1U:0U);
+    }
+
+    if (base == "log" || base == "log2")
+    {
+        const std::string variant=value("variant");
+        const std::string axis=value("axis","y");
+        int axisBits=axis=="x"?4:axis=="z"?8:axis=="none"?12:axis=="y"?0:-1;
+        if(axisBits<0)return std::nullopt;
+        BlockType block=BlockType::OakLog;
+        int species=0;
+        if(variant=="oak"){block=BlockType::OakLog;species=0;}
+        else if(variant=="spruce"){block=BlockType::SpruceLog;species=1;}
+        else if(variant=="birch"){block=BlockType::BirchLog;species=2;}
+        else if(variant=="jungle"){block=BlockType::JungleLog;species=3;}
+        else if(variant=="acacia"){block=BlockType::AcaciaLog;species=0;}
+        else if(variant=="dark_oak"){block=BlockType::DarkOakLog;species=1;}
+        else return std::nullopt;
+        return mc::content::BlockState(
+            block, static_cast<std::uint16_t>(species|axisBits));
+    }
+
     if (base == "lever")
     {
         static const std::unordered_map<std::string, int> orientation{
@@ -324,7 +394,7 @@ std::string splitVariantName(
         drop({"type"});
         static const std::unordered_map<std::string, std::string> names{
             {"poppy","poppy"},{"blue_orchid","blue_orchid"},{"allium","allium"},
-            {"houstonia","azure_bluet"},{"red_tulip","red_tulip"},
+            {"houstonia","houstonia"},{"red_tulip","red_tulip"},
             {"orange_tulip","orange_tulip"},{"white_tulip","white_tulip"},
             {"pink_tulip","pink_tulip"},{"oxeye_daisy","oxeye_daisy"}
         };
@@ -332,18 +402,21 @@ std::string splitVariantName(
     }
     if (base == "tallgrass" && !type.empty())
     {
-        drop({"type"});
-        if (type == "fern") return "fern";
-        if (type == "dead_bush") return "deadbush";
-        return "tall_grass";
+        // The 1.12 resource pack keeps minecraft:tallgrass as one registry
+        // block with its stored "type" property. Do not rewrite its metadata
+        // variants into modern split registry names.
+        return base;
     }
     if (base == "double_plant" && !variant.empty())
     {
+        // The bundled 1.12 resource pack already exposes each metadata
+        // variant using its original 1.12 variant name. Keep HALF as a stored
+        // property and remove only the legacy selector property.
         drop({"variant"});
         static const std::unordered_map<std::string, std::string> names{
-            {"sunflower","sunflower"},{"syringa","lilac"},
-            {"double_grass","double_tallgrass"},{"double_fern","large_fern"},
-            {"double_rose","rose_bush"},{"paeonia","peony"}
+            {"sunflower","sunflower"},{"syringa","syringa"},
+            {"double_grass","double_grass"},{"double_fern","double_fern"},
+            {"double_rose","double_rose"},{"paeonia","paeonia"}
         };
         if (const auto it = names.find(variant); it != names.end()) return it->second;
     }
@@ -451,6 +524,24 @@ std::optional<mc::content::BlockState> tryVanilla112State(
 
     if (auto exact = tryState(mapped, std::span<const Property>(remaining)); exact)
         return exact;
+
+    auto normalized = remaining;
+    const auto eraseDefault = [&](std::string_view key, std::string_view expected)
+    {
+        const auto it=std::find_if(normalized.begin(),normalized.end(),
+            [&](const Property& p){return p.first==key;});
+        if(it!=normalized.end() && it->second==expected) normalized.erase(it);
+    };
+    if(mapped=="flower_pot") eraseDefault("legacy_data","0");
+    if(mapped=="cobblestone_wall") eraseDefault("variant","cobblestone");
+    if(mapped=="bed") eraseDefault("occupied","false");
+    if(mapped=="iron_door" || mapped=="dark_oak_door") eraseDefault("powered","false");
+    if(mapped=="dark_oak_fence_gate") eraseDefault("powered","false");
+    if(mapped=="skull") eraseDefault("nodrop","false");
+
+    if(normalized != remaining)
+        if(auto compatible=tryState(mapped,std::span<const Property>(normalized));compatible)
+            return compatible;
 
     // Never discard a 1.12 property just to obtain the right block identity.
     // Rendering-only resource JSON omits legitimate stored properties for

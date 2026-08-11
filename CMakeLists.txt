@@ -447,6 +447,36 @@ if(BUILD_TESTING)
         COMMAND minecraft_migration_stages_tests
     )
 
+    add_executable(minecraft_structure_palette_tests
+        tests/StructurePaletteCompatibilityTests.cpp
+    )
+    target_include_directories(minecraft_structure_palette_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(minecraft_structure_palette_tests PRIVATE
+        minecraft_game
+        minecraft_world
+    )
+    add_test(
+        NAME minecraft_structure_palette_tests
+        COMMAND minecraft_structure_palette_tests
+    )
+
+    add_executable(minecraft_structure_fidelity_tests
+        tests/StructureFidelityTests.cpp
+    )
+    target_include_directories(minecraft_structure_fidelity_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(minecraft_structure_fidelity_tests PRIVATE
+        minecraft_game
+        minecraft_world
+    )
+    add_test(NAME minecraft_structure_fidelity_tests COMMAND minecraft_structure_fidelity_tests)
+    set_tests_properties(minecraft_structure_fidelity_tests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
     add_executable(minecraft_world_generation_tests
         tests/WorldGenerationTests.cpp
     )
@@ -466,6 +496,7 @@ if(BUILD_TESTING)
         minecraft_gameplay_data_tests
         minecraft_entity_runtime_tests
         minecraft_migration_stages_tests
+        minecraft_structure_palette_tests
         PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endif()

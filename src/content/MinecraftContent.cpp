@@ -376,7 +376,11 @@ BlockBehaviour resourceBehaviour(std::string_view name)
         "red_flower", "brown_mushroom", "red_mushroom", "wheat",
         "carrots", "potatoes", "beetroots", "reeds", "vine",
         "waterlily", "nether_wart", "cocoa", "chorus_plant",
-        "chorus_flower"
+        "chorus_flower",
+        "poppy", "blue_orchid", "allium", "houstonia",
+        "red_tulip", "orange_tulip", "white_tulip", "pink_tulip",
+        "oxeye_daisy", "sunflower", "syringa", "double_grass",
+        "double_fern", "double_rose", "paeonia"
     }) || endsWith(name, "_sapling") || endsWith(name, "_stem");
     const bool rail = name == "rail" || endsWith(name, "_rail");
     const bool component = containsAny(name, {
@@ -472,6 +476,38 @@ BlockBehaviour resourceBehaviour(std::string_view name)
     if (containsAny(name, {"bedrock", "barrier", "command_block", "structure_block"}))
         behaviour.dropRule = BlockDropRule::None;
     return behaviour;
+}
+
+void registerStructureCompatibilityBlocks(ContentCatalog& catalog)
+{
+    const auto addSynthetic=[&](std::string_view path,
+        std::vector<std::vector<std::pair<std::string,std::string>>> states)
+    {
+        const core::ResourceLocation name=id(path);
+        if(catalog.blocks().find(name)!=nullptr) return;
+        BlockStateSchema schema; schema.states=std::move(states);
+        BlockBehaviour behaviour=resourceBehaviour(path);
+        behaviour.traits.opaque=false; behaviour.lightOpacity=0;
+        catalog.registerBlock(name,{
+            std::nullopt,displayNameFor(std::string(path)),{},std::move(schema),
+            behaviour,RenderLayer::Cutout
+        });
+    };
+    const auto horizontal=[]()
+    {
+        std::vector<std::vector<std::pair<std::string,std::string>>> out;
+        for(const char* f:{"north","east","south","west"})
+            out.push_back({{"facing",f}});
+        return out;
+    };
+    addSynthetic("wall_sign",horizontal());
+    addSynthetic("wall_banner",horizontal());
+    addSynthetic("ender_chest",horizontal());
+    addSynthetic("trapped_chest",horizontal());
+    std::vector<std::vector<std::pair<std::string,std::string>>> skull;
+    for(const char* f:{"down","up","north","south","west","east"})
+        skull.push_back({{"facing",f}});
+    addSynthetic("skull",std::move(skull));
 }
 
 void registerResourceContent(
@@ -817,5 +853,6 @@ void registerMinecraftContent(
     catalog.registerBlockEntityType(id("mob_spawner"), {"Mob Spawner", 1});
 
     registerResourceContent(catalog, assetRoot);
+    registerStructureCompatibilityBlocks(catalog);
 }
 }

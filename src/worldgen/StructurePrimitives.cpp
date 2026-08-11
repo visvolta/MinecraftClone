@@ -135,6 +135,52 @@ mc::content::BlockState rotateLegacyState(
     if(rotation==Rotation::None) return value;
     const std::uint16_t metadata=value.properties();
 
+    if(value.block()==BlockType::Ladder || value.block()==BlockType::Pumpkin ||
+       value.block()==BlockType::RedstoneTorch)
+    {
+        auto decode=[&]() -> std::string {
+            if(value.block()==BlockType::Ladder)
+            {
+                if(metadata==2)return "north";if(metadata==3)return "south";
+                if(metadata==4)return "west";if(metadata==5)return "east";
+            }
+            else if(value.block()==BlockType::Pumpkin)
+            {
+                if((metadata&3)==0)return "south";if((metadata&3)==1)return "west";
+                if((metadata&3)==2)return "north";return "east";
+            }
+            else
+            {
+                if(metadata==1)return "east";if(metadata==2)return "west";
+                if(metadata==3)return "south";if(metadata==4)return "north";
+                return "up";
+            }
+            return {};
+        };
+        std::string facing=decode();
+        if(facing=="up"||facing.empty())return value;
+        facing=rotateHorizontalName(std::move(facing),rotation);
+        int encoded=0;
+        if(value.block()==BlockType::Ladder)
+            encoded=facing=="north"?2:facing=="south"?3:facing=="west"?4:5;
+        else if(value.block()==BlockType::Pumpkin)
+            encoded=facing=="south"?0:facing=="west"?1:facing=="north"?2:3;
+        else
+            encoded=facing=="east"?1:facing=="west"?2:facing=="south"?3:4;
+        return value.withProperties(static_cast<std::uint16_t>(encoded));
+    }
+
+    if(isLog(value.block()))
+    {
+        if(rotation==Rotation::Clockwise90||rotation==Rotation::CounterClockwise90)
+        {
+            const std::uint16_t axis=metadata&12U;
+            if(axis==4U)return value.withProperties((metadata&3U)|8U);
+            if(axis==8U)return value.withProperties((metadata&3U)|4U);
+        }
+        return value;
+    }
+
     if(value.block()==BlockType::Lever)
     {
         auto orientation=leverOrientationName(metadata);
@@ -231,7 +277,9 @@ mc::content::BlockState rotateState(mc::content::BlockState value,Rotation rotat
     const auto legacyRotated=rotateLegacyState(value,rotation);
     if(legacyRotated!=value || value.block()==BlockType::Lever ||
        value.block()==BlockType::Piston || value.block()==BlockType::StickyPiston ||
-       value.block()==BlockType::Repeater || value.block()==BlockType::Vine)
+       value.block()==BlockType::Repeater || value.block()==BlockType::Vine ||
+       value.block()==BlockType::Ladder || value.block()==BlockType::Pumpkin ||
+       value.block()==BlockType::RedstoneTorch || isLog(value.block()))
         return legacyRotated;
     const auto* active=mc::content::ContentCatalog::active();
     if(active==nullptr)return value;

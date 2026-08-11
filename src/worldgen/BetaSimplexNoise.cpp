@@ -1,239 +1,31 @@
 #include "worldgen/BetaSimplexNoise.h"
-
 #include "worldgen/JavaRandom.h"
-
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <utility>
-
-namespace
-{
-constexpr std::array<std::array<int, 3>, 12> gradients{{
-    {{1, 1, 0}},
-    {{-1, 1, 0}},
-    {{1, -1, 0}},
-    {{-1, -1, 0}},
-    {{1, 0, 1}},
-    {{-1, 0, 1}},
-    {{1, 0, -1}},
-    {{-1, 0, -1}},
-    {{0, 1, 1}},
-    {{0, -1, 1}},
-    {{0, 1, -1}},
-    {{0, -1, -1}}
-}};
-
-const double skewFactor =
-    0.5 * (std::sqrt(3.0) - 1.0);
-const double unskewFactor =
-    (3.0 - std::sqrt(3.0)) / 6.0;
+namespace{
+constexpr std::array<std::array<int,3>,12> gradients{{{{1,1,0}},{{-1,1,0}},{{1,-1,0}},{{-1,-1,0}},{{1,0,1}},{{-1,0,1}},{{1,0,-1}},{{-1,0,-1}},{{0,1,1}},{{0,-1,1}},{{0,1,-1}},{{0,-1,-1}}}};
+const double F2=.5*(std::sqrt(3.0)-1.0),G2=(3.0-std::sqrt(3.0))/6.0;
 }
-
-BetaSimplexNoise::BetaSimplexNoise(JavaRandom& random)
-    : offsetX_(random.nextDouble() * 256.0),
-      offsetZ_(random.nextDouble() * 256.0),
-      offsetY_(random.nextDouble() * 256.0)
+BetaSimplexNoise::BetaSimplexNoise(JavaRandom& r):offsetX_(r.nextDouble()*256.0),offsetZ_(r.nextDouble()*256.0),offsetY_(r.nextDouble()*256.0){std::array<int,256> p{};for(int i=0;i<256;++i)p[i]=i;for(int i=0;i<256;++i){int j=i+r.nextInt(256-i);std::swap(p[i],p[j]);permutations_[i]=p[i];permutations_[i+256]=p[i];}}
+int BetaSimplexNoise::fastFloor(double v) noexcept{return v>0.0?static_cast<int>(v):static_cast<int>(v)-1;}
+double BetaSimplexNoise::gradientDot(int g,double x,double z) noexcept{return gradients[static_cast<std::size_t>(g)][0]*x+gradients[static_cast<std::size_t>(g)][1]*z;}
+double BetaSimplexNoise::value(double x,double z) const
 {
-    std::array<int, 256> source{};
-
-    for (int index = 0; index < 256; ++index)
-    {
-        source[index] = index;
-    }
-
-    for (int index = 0; index < 256; ++index)
-    {
-        const int swapIndex =
-            index + random.nextInt(256 - index);
-
-        std::swap(
-            source[index],
-            source[swapIndex]
-        );
-
-        permutations_[index] = source[index];
-        permutations_[index + 256] = source[index];
-    }
+    const double s=(x+z)*F2;const int i=fastFloor(x+s),j=fastFloor(z+s);const double t=(i+j)*G2;
+    const double x0=x-(i-t),z0=z-(j-t);const int i1=x0>z0?1:0,j1=x0>z0?0:1;
+    const double x1=x0-i1+G2,z1=z0-j1+G2,x2=x0-1.0+2.0*G2,z2=z0-1.0+2.0*G2;
+    const int ii=i&255,jj=j&255;const int g0=permutations_[ii+permutations_[jj]]%12,g1=permutations_[ii+i1+permutations_[jj+j1]]%12,g2=permutations_[ii+1+permutations_[jj+1]]%12;
+    auto contribution=[](double a,double gx,double gz,double dot){if(a<0.0)return 0.0;a*=a;return a*a*dot;};
+    const double n0=contribution(.5-x0*x0-z0*z0,x0,z0,gradientDot(g0,x0,z0));
+    const double n1=contribution(.5-x1*x1-z1*z1,x1,z1,gradientDot(g1,x1,z1));
+    const double n2=contribution(.5-x2*x2-z2*z2,x2,z2,gradientDot(g2,x2,z2));
+    return 70.0*(n0+n1+n2);
 }
-
-void BetaSimplexNoise::add(
-    std::vector<double>& output,
-    double originX,
-    double originZ,
-    int sizeX,
-    int sizeZ,
-    double scaleX,
-    double scaleZ,
-    double amplitude) const
+void BetaSimplexNoise::add(std::vector<double>& out,double ox,double oz,int sx,int sz,double scaleX,double scaleZ,double amp) const
 {
-    if (sizeX <= 0 || sizeZ <= 0)
-        return;
-
-    const std::size_t requiredSize =
-        static_cast<std::size_t>(sizeX) *
-        static_cast<std::size_t>(sizeZ);
-    if (output.size() < requiredSize)
-        output.resize(requiredSize, 0.0);
-
-    std::size_t outputIndex = 0;
-
-    for (int xIndex = 0;
-         xIndex < sizeX;
-         ++xIndex)
-    {
-        const double inputX =
-            (originX + static_cast<double>(xIndex)) *
-                scaleX +
-            offsetX_;
-
-        for (int zIndex = 0;
-             zIndex < sizeZ;
-             ++zIndex)
-        {
-            const double inputZ =
-                (originZ + static_cast<double>(zIndex)) *
-                    scaleZ +
-                offsetZ_;
-
-            const double skew =
-                (inputX + inputZ) * skewFactor;
-
-            const int cellX =
-                fastFloor(inputX + skew);
-            const int cellZ =
-                fastFloor(inputZ + skew);
-
-            const double unskew =
-                static_cast<double>(cellX + cellZ) *
-                unskewFactor;
-
-            const double cellOriginX =
-                static_cast<double>(cellX) - unskew;
-            const double cellOriginZ =
-                static_cast<double>(cellZ) - unskew;
-
-            const double x0 = inputX - cellOriginX;
-            const double z0 = inputZ - cellOriginZ;
-
-            const int stepX = x0 > z0 ? 1 : 0;
-            const int stepZ = x0 > z0 ? 0 : 1;
-
-            const double x1 =
-                x0 -
-                static_cast<double>(stepX) +
-                unskewFactor;
-            const double z1 =
-                z0 -
-                static_cast<double>(stepZ) +
-                unskewFactor;
-            const double x2 =
-                x0 - 1.0 + 2.0 * unskewFactor;
-            const double z2 =
-                z0 - 1.0 + 2.0 * unskewFactor;
-
-            const int wrappedX = cellX & 255;
-            const int wrappedZ = cellZ & 255;
-
-            const int gradient0 =
-                permutations_[
-                    wrappedX +
-                    permutations_[wrappedZ]
-                ] %
-                12;
-
-            const int gradient1 =
-                permutations_[
-                    wrappedX +
-                    stepX +
-                    permutations_[wrappedZ + stepZ]
-                ] %
-                12;
-
-            const int gradient2 =
-                permutations_[
-                    wrappedX +
-                    1 +
-                    permutations_[wrappedZ + 1]
-                ] %
-                12;
-
-            double contribution0 = 0.0;
-            double contribution1 = 0.0;
-            double contribution2 = 0.0;
-
-            double attenuation =
-                0.5 - x0 * x0 - z0 * z0;
-
-            if (attenuation >= 0.0)
-            {
-                attenuation *= attenuation;
-                contribution0 =
-                    attenuation *
-                    attenuation *
-                    gradientDot(gradient0, x0, z0);
-            }
-
-            attenuation =
-                0.5 - x1 * x1 - z1 * z1;
-
-            if (attenuation >= 0.0)
-            {
-                attenuation *= attenuation;
-                contribution1 =
-                    attenuation *
-                    attenuation *
-                    gradientDot(gradient1, x1, z1);
-            }
-
-            attenuation =
-                0.5 - x2 * x2 - z2 * z2;
-
-            if (attenuation >= 0.0)
-            {
-                attenuation *= attenuation;
-                contribution2 =
-                    attenuation *
-                    attenuation *
-                    gradientDot(gradient2, x2, z2);
-            }
-
-            output[outputIndex++] +=
-                70.0 *
-                (contribution0 +
-                 contribution1 +
-                 contribution2) *
-                amplitude;
-        }
-    }
-}
-
-int BetaSimplexNoise::fastFloor(
-    double value) noexcept
-{
-    // Reproduce Beta's NoiseGenerator2.wrap behaviour.
-    return value > 0.0
-        ? static_cast<int>(value)
-        : static_cast<int>(value) - 1;
-}
-
-double BetaSimplexNoise::gradientDot(
-    int gradientIndex,
-    double x,
-    double z) noexcept
-{
-    return
-        static_cast<double>(
-            gradients[
-                static_cast<std::size_t>(gradientIndex)
-            ][0]
-        ) *
-            x +
-        static_cast<double>(
-            gradients[
-                static_cast<std::size_t>(gradientIndex)
-            ][1]
-        ) *
-            z;
+    if(sx<=0||sz<=0)return;const std::size_t need=static_cast<std::size_t>(sx)*sz;if(out.size()<need)out.resize(need,0.0);std::size_t idx=0;
+    for(int x=0;x<sx;++x){const double inputX=(ox+x)*scaleX+offsetX_;for(int z=0;z<sz;++z){const double inputZ=(oz+z)*scaleZ+offsetZ_;const double s=(inputX+inputZ)*F2;const int i=fastFloor(inputX+s),j=fastFloor(inputZ+s);const double t=(i+j)*G2;const double x0=inputX-(i-t),z0=inputZ-(j-t);const int i1=x0>z0?1:0,j1=x0>z0?0:1;const double x1=x0-i1+G2,z1=z0-j1+G2,x2=x0-1.0+2.0*G2,z2=z0-1.0+2.0*G2;const int ii=i&255,jj=j&255;const int g0=permutations_[ii+permutations_[jj]]%12,g1=permutations_[ii+i1+permutations_[jj+j1]]%12,g2=permutations_[ii+1+permutations_[jj+1]]%12;double a=.5-x0*x0-z0*z0,n0=0,n1=0,n2=0;if(a>=0){a*=a;n0=a*a*gradientDot(g0,x0,z0);}a=.5-x1*x1-z1*z1;if(a>=0){a*=a;n1=a*a*gradientDot(g1,x1,z1);}a=.5-x2*x2-z2*z2;if(a>=0){a*=a;n2=a*a*gradientDot(g2,x2,z2);}out[idx++]+=70.0*(n0+n1+n2)*amp;}}
 }

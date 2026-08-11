@@ -1,25 +1,50 @@
 #include "worldgen/PopulationGenerator.h"
 
+#include "Block.h"
 #include "Chunk.h"
+#include "content/BlockState.h"
+#include "content/ContentCatalog.h"
+#include "core/ResourceLocation.h"
+#include "worldgen/BetaSimplexOctaves.h"
+#include "worldgen/Biome.h"
+#include "worldgen/BiomeMap.h"
 #include "worldgen/ClayGenerator.h"
-#include "worldgen/JavaRandom.h"
-#include "worldgen/LakeGenerator.h"
-#include "worldgen/OreGenerator.h"
-#include "worldgen/TreeGenerator.h"
 #include "worldgen/DecorationGenerator.h"
 #include "worldgen/DungeonGenerator.h"
-#include "worldgen/Biome.h"
+#include "worldgen/JavaRandom.h"
+#include "worldgen/LakeGenerator.h"
+#include "worldgen/MinableGenerator.h"
+#include "worldgen/OreGenerator.h"
+#include "worldgen/TreeGenerator.h"
 #include "worldgen/WorldGenerationContext.h"
 
-#include <bit>
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <cstdint>
+#include <optional>
+#include <string_view>
+#include <utility>
 
 namespace
 {
-std::int64_t makeOdd(std::int64_t value)
+std::int64_t makeOdd(std::int64_t value) noexcept
 {
     return value / 2LL * 2LL + 1LL;
+}
+
+std::int64_t addWrap(std::int64_t first, std::int64_t second) noexcept
+{
+    return std::bit_cast<std::int64_t>(
+        static_cast<std::uint64_t>(first) +
+        static_cast<std::uint64_t>(second));
+}
+
+std::int64_t mulWrap(std::int64_t first, std::int64_t second) noexcept
+{
+    return std::bit_cast<std::int64_t>(
+        static_cast<std::uint64_t>(first) *
+        static_cast<std::uint64_t>(second));
 }
 
 std::int64_t populationSeed(
@@ -27,20 +52,500 @@ std::int64_t populationSeed(
     std::int64_t xMultiplier,
     int chunkZ,
     std::int64_t zMultiplier,
-    std::int64_t worldSeed)
+    std::int64_t worldSeed) noexcept
 {
-    std::uint64_t value =
-        static_cast<std::uint64_t>(
-            static_cast<std::int64_t>(chunkX)) *
-        static_cast<std::uint64_t>(xMultiplier);
+    const std::uint64_t value =
+        static_cast<std::uint64_t>(mulWrap(chunkX, xMultiplier)) +
+        static_cast<std::uint64_t>(mulWrap(chunkZ, zMultiplier));
+    return std::bit_cast<std::int64_t>(
+        value ^ static_cast<std::uint64_t>(worldSeed));
+}
 
-    value +=
-        static_cast<std::uint64_t>(
-            static_cast<std::int64_t>(chunkZ)) *
-        static_cast<std::uint64_t>(zMultiplier);
+int floorDivide(int value, int divisor) noexcept
+{
+    int quotient = value / divisor;
+    const int remainder = value % divisor;
+    if (remainder != 0 && ((remainder < 0) != (divisor < 0)))
+        --quotient;
+    return quotient;
+}
 
-    value ^= static_cast<std::uint64_t>(worldSeed);
-    return std::bit_cast<std::int64_t>(value);
+bool isVillageBiome(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::Plains ||
+           biome == VanillaBiomes::Desert ||
+           biome == VanillaBiomes::Savanna ||
+           biome == VanillaBiomes::Taiga;
+}
+
+bool villageStarts(std::int64_t worldSeed, int chunkX, int chunkZ)
+{
+    const int regionX = floorDivide(chunkX, 32);
+    const int regionZ = floorDivide(chunkZ, 32);
+
+    std::int64_t seed = mulWrap(regionX, 341873128712LL);
+    seed = addWrap(seed, mulWrap(regionZ, 132897987541LL));
+    seed = addWrap(seed, worldSeed);
+    seed = addWrap(seed, 10387312LL);
+    JavaRandom random(seed);
+
+    const int candidateX = regionX * 32 + random.nextInt(24);
+    const int candidateZ = regionZ * 32 + random.nextInt(24);
+    if (candidateX != chunkX || candidateZ != chunkZ)
+        return false;
+
+    BiomeMap map(worldSeed);
+    const auto sample = map.sampleGenerationArea(
+        chunkX * 4 + 2,
+        chunkZ * 4 + 2,
+        1,
+        1);
+    return !sample.empty() && isVillageBiome(sample.front().biome);
+}
+
+const BetaSimplexOctaves& biomeGrassNoise()
+{
+    static JavaRandom random(2345LL);
+    static BetaSimplexOctaves noise(random, 1);
+    return noise;
+}
+
+bool isTaigaClass(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::Taiga ||
+           biome == VanillaBiomes::TaigaHills ||
+           biome == VanillaBiomes::TaigaMountains ||
+           biome == VanillaBiomes::ColdTaiga ||
+           biome == VanillaBiomes::ColdTaigaHills ||
+           biome == VanillaBiomes::ColdTaigaMountains ||
+           biome == VanillaBiomes::MegaTaiga ||
+           biome == VanillaBiomes::MegaTaigaHills ||
+           biome == VanillaBiomes::MegaSpruceTaiga ||
+           biome == VanillaBiomes::MegaSpruceTaigaHills;
+}
+
+bool isMegaTaiga(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::MegaTaiga ||
+           biome == VanillaBiomes::MegaTaigaHills ||
+           biome == VanillaBiomes::MegaSpruceTaiga ||
+           biome == VanillaBiomes::MegaSpruceTaigaHills;
+}
+
+bool isForestClass(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::Forest ||
+           biome == VanillaBiomes::ForestHills ||
+           biome == VanillaBiomes::FlowerForest ||
+           biome == VanillaBiomes::BirchForest ||
+           biome == VanillaBiomes::BirchForestHills ||
+           biome == VanillaBiomes::BirchForestMountains ||
+           biome == VanillaBiomes::BirchForestHillsMountains ||
+           biome == VanillaBiomes::RoofedForest ||
+           biome == VanillaBiomes::RoofedForestMountains;
+}
+
+bool isRoofedForest(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::RoofedForest ||
+           biome == VanillaBiomes::RoofedForestMountains;
+}
+
+bool isPlainsClass(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::Plains ||
+           biome == VanillaBiomes::SunflowerPlains;
+}
+
+bool isJungleClass(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::Jungle ||
+           biome == VanillaBiomes::JungleHills ||
+           biome == VanillaBiomes::JungleEdge ||
+           biome == VanillaBiomes::JungleMountains ||
+           biome == VanillaBiomes::JungleEdgeMountains;
+}
+
+bool isHillsClass(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::ExtremeHills ||
+           biome == VanillaBiomes::ExtremeHillsEdge ||
+           biome == VanillaBiomes::ExtremeHillsPlus ||
+           biome == VanillaBiomes::ExtremeHillsMountains ||
+           biome == VanillaBiomes::ExtremeHillsPlusMountains;
+}
+
+bool isMesa(BiomeId biome) noexcept
+{
+    return biome == VanillaBiomes::Mesa ||
+           biome == VanillaBiomes::MesaPlateauF ||
+           biome == VanillaBiomes::MesaPlateau ||
+           biome == VanillaBiomes::MesaBryce ||
+           biome == VanillaBiomes::MesaPlateauFMountains ||
+           biome == VanillaBiomes::MesaPlateauMountains;
+}
+
+mc::content::BlockState namedState(
+    std::string_view name,
+    BlockType fallback)
+{
+    const auto* catalog = mc::content::ContentCatalog::active();
+    if (catalog != nullptr)
+    {
+        if (const auto state = catalog->state(
+                mc::core::ResourceLocation("minecraft", name)))
+            return *state;
+    }
+    return mc::content::BlockState(fallback);
+}
+
+bool sameRuntimeBlock(
+    mc::content::BlockState first,
+    mc::content::BlockState second) noexcept
+{
+    return first.blockRuntimeId() == second.blockRuntimeId();
+}
+
+void generateSpring(
+    WorldGenerationContext& context,
+    BlockType liquid,
+    int x,
+    int y,
+    int z)
+{
+    if (context.getBlock(x, y + 1, z) != BlockType::Stone ||
+        context.getBlock(x, y - 1, z) != BlockType::Stone)
+        return;
+
+    const BlockType current = context.getBlock(x, y, z);
+    if (current != BlockType::Air && current != BlockType::Stone)
+        return;
+
+    int stone = 0;
+    int air = 0;
+    for (const auto [dx, dz] : {
+             std::pair{-1, 0}, std::pair{1, 0},
+             std::pair{0, -1}, std::pair{0, 1}})
+    {
+        const BlockType block = context.getBlock(x + dx, y, z + dz);
+        if (block == BlockType::Stone) ++stone;
+        if (block == BlockType::Air) ++air;
+    }
+    if (stone == 3 && air == 1)
+        context.setBlock(x, y, z, liquid);
+}
+
+bool consumeDoublePlantGenerator(
+    WorldGenerationContext& context,
+    JavaRandom& random,
+    int x,
+    int y,
+    int z)
+{
+    // WorldGenDoublePlant performs 64 scatter attempts. The current legacy
+    // block enum has no double-plant state, but placement viability is still
+    // evaluated so BiomeForest's retry/break behavior consumes the right RNG.
+    bool generated = false;
+    for (int attempt = 0; attempt < 64; ++attempt)
+    {
+        const int px = x + random.nextInt(8) - random.nextInt(8);
+        const int py = y + random.nextInt(4) - random.nextInt(4);
+        const int pz = z + random.nextInt(8) - random.nextInt(8);
+        if (py <= 0 || py >= Chunk::HEIGHT - 1)
+            continue;
+        if (context.getBlockState(px, py, pz).isAir() &&
+            context.getBlockState(px, py + 1, pz).isAir())
+        {
+            const BlockType below = context.getBlock(px, py - 1, pz);
+            if (below == BlockType::Grass ||
+                below == BlockType::Dirt ||
+                below == BlockType::Farmland ||
+                below == BlockType::Podzol)
+                generated = true;
+        }
+    }
+    return generated;
+}
+
+void generateForestRock(
+    WorldGenerationContext& context,
+    JavaRandom& random,
+    int x,
+    int y,
+    int z)
+{
+    // WorldGenBlockBlob(MOSSY_COBBLESTONE, 0).
+    while (y > 3)
+    {
+        const BlockType below = context.getBlock(x, y - 1, z);
+        if (below == BlockType::Grass ||
+            below == BlockType::Dirt ||
+            below == BlockType::Podzol ||
+            below == BlockType::Stone)
+            break;
+        --y;
+    }
+    if (y <= 3)
+        return;
+
+    constexpr int startRadius = 0;
+    for (int pass = 0; pass < 3; ++pass)
+    {
+        const int radiusX = startRadius + random.nextInt(2);
+        const int radiusY = startRadius + random.nextInt(2);
+        const int radiusZ = startRadius + random.nextInt(2);
+        const float radius =
+            static_cast<float>(radiusX + radiusY + radiusZ) * 0.333F + 0.5F;
+        const float radiusSquared = radius * radius;
+
+        for (int px = x - radiusX; px <= x + radiusX; ++px)
+            for (int py = y - radiusY; py <= y + radiusY; ++py)
+                for (int pz = z - radiusZ; pz <= z + radiusZ; ++pz)
+                {
+                    const int dx = px - x;
+                    const int dy = py - y;
+                    const int dz = pz - z;
+                    if (static_cast<float>(dx * dx + dy * dy + dz * dz) <=
+                        radiusSquared)
+                        context.setBlock(px, py, pz, BlockType::MossyCobblestone);
+                }
+
+        const int shiftX = random.nextInt(2);
+        const int shiftY = random.nextInt(2);
+        const int shiftZ = random.nextInt(2);
+        x += -(startRadius + 1) + shiftX;
+        y -= shiftY;
+        z += -(startRadius + 1) + shiftZ;
+    }
+}
+
+void generateIcePath(
+    WorldGenerationContext& context,
+    JavaRandom& random,
+    int x,
+    int y,
+    int z)
+{
+    const mc::content::BlockState packedIce =
+        namedState("packed_ice", BlockType::Ice);
+    const mc::content::BlockState snow =
+        namedState("snow", BlockType::Snow);
+
+    y = std::max(3, y - 1);
+    const int radius = random.nextInt(2) + 2; // basePathWidth = 4
+    for (int px = x - radius; px <= x + radius; ++px)
+    {
+        for (int pz = z - radius; pz <= z + radius; ++pz)
+        {
+            const int dx = px - x;
+            const int dz = pz - z;
+            if (dx * dx + dz * dz > radius * radius)
+                continue;
+
+            for (int py = y - 1; py <= y + 1; ++py)
+            {
+                const auto state = context.getBlockState(px, py, pz);
+                const BlockType block = state.block();
+                if (block == BlockType::Dirt ||
+                    block == BlockType::Snow ||
+                    block == BlockType::Ice ||
+                    sameRuntimeBlock(state, snow))
+                    context.setBlockState(px, py, pz, packedIce);
+            }
+        }
+    }
+}
+
+void generateIceSpike(
+    WorldGenerationContext& context,
+    JavaRandom& random,
+    int x,
+    int y,
+    int z)
+{
+    const mc::content::BlockState packedIce =
+        namedState("packed_ice", BlockType::Ice);
+    const mc::content::BlockState snow =
+        namedState("snow", BlockType::Snow);
+
+    // world.getHeight() gives the first air block; the vanilla generator then
+    // descends through air to the snow surface without consuming RNG.
+    y = std::max(3, y - 1);
+    y += random.nextInt(4);
+    const int height = random.nextInt(4) + 7;
+    const int baseRadius = height / 4 + random.nextInt(2);
+    if (baseRadius > 1 && random.nextInt(60) == 0)
+        y += 10 + random.nextInt(30);
+
+    for (int layer = 0; layer < height; ++layer)
+    {
+        const float radius =
+            (1.0F - static_cast<float>(layer) / static_cast<float>(height)) *
+            static_cast<float>(baseRadius);
+        const int ceilRadius = static_cast<int>(std::ceil(radius));
+        for (int dx = -ceilRadius; dx <= ceilRadius; ++dx)
+        {
+            const float fx = static_cast<float>(std::abs(dx)) - 0.25F;
+            for (int dz = -ceilRadius; dz <= ceilRadius; ++dz)
+            {
+                const float fz = static_cast<float>(std::abs(dz)) - 0.25F;
+                const bool inside =
+                    (dx == 0 && dz == 0) ||
+                    fx * fx + fz * fz <= radius * radius;
+                if (!inside)
+                    continue;
+
+                const bool onSquareEdge =
+                    dx == -ceilRadius || dx == ceilRadius ||
+                    dz == -ceilRadius || dz == ceilRadius;
+                if (onSquareEdge && random.nextFloat() > 0.75F)
+                    continue;
+
+                const auto topState = context.getBlockState(x + dx, y + layer, z + dz);
+                const BlockType topBlock = topState.block();
+                if (topState.isAir() || topBlock == BlockType::Dirt ||
+                    topBlock == BlockType::Snow || topBlock == BlockType::Ice ||
+                    sameRuntimeBlock(topState, snow))
+                    context.setBlockState(x + dx, y + layer, z + dz, packedIce);
+
+                if (layer != 0 && ceilRadius > 1)
+                {
+                    const auto bottomState =
+                        context.getBlockState(x + dx, y - layer, z + dz);
+                    const BlockType bottomBlock = bottomState.block();
+                    if (bottomState.isAir() || bottomBlock == BlockType::Dirt ||
+                        bottomBlock == BlockType::Snow || bottomBlock == BlockType::Ice ||
+                        sameRuntimeBlock(bottomState, snow))
+                        context.setBlockState(x + dx, y - layer, z + dz, packedIce);
+                }
+            }
+        }
+    }
+
+    const int rootRadius = std::clamp(baseRadius - 1, 0, 1);
+    for (int dx = -rootRadius; dx <= rootRadius; ++dx)
+    {
+        for (int dz = -rootRadius; dz <= rootRadius; ++dz)
+        {
+            int py = y - 1;
+            int remaining = 50;
+            if (std::abs(dx) == 1 && std::abs(dz) == 1)
+                remaining = random.nextInt(5);
+
+            while (py > 50)
+            {
+                const auto state = context.getBlockState(x + dx, py, z + dz);
+                const BlockType block = state.block();
+                const bool replaceable =
+                    state.isAir() || block == BlockType::Dirt ||
+                    block == BlockType::Snow || block == BlockType::Ice ||
+                    sameRuntimeBlock(state, snow) ||
+                    sameRuntimeBlock(state, packedIce);
+                if (!replaceable)
+                    break;
+
+                context.setBlockState(x + dx, py, z + dz, packedIce);
+                --py;
+                --remaining;
+                if (remaining <= 0)
+                {
+                    py -= random.nextInt(5) + 1;
+                    remaining = random.nextInt(5);
+                }
+            }
+        }
+    }
+}
+
+bool generateSandPatch(
+    WorldGenerationContext& context,
+    JavaRandom& random,
+    BlockType replacement,
+    int x,
+    int y,
+    int z,
+    int configuredRadius)
+{
+    // WorldGenSand: water-only start, radius random(radius-2)+2, replace
+    // dirt/grass in a five-block-thick disk.
+    if (context.getBlock(x, y, z) != BlockType::Water)
+        return false;
+
+    const int radius = random.nextInt(configuredRadius - 2) + 2;
+    for (int px = x - radius; px <= x + radius; ++px)
+    {
+        for (int pz = z - radius; pz <= z + radius; ++pz)
+        {
+            const int dx = px - x;
+            const int dz = pz - z;
+            if (dx * dx + dz * dz > radius * radius)
+                continue;
+
+            for (int py = y - 2; py <= y + 2; ++py)
+            {
+                const BlockType current = context.getBlock(px, py, pz);
+                if (current == BlockType::Dirt || current == BlockType::Grass)
+                    context.setBlock(px, py, pz, replacement);
+            }
+        }
+    }
+    return true;
+}
+
+BlockType pickFlowerForBiome(
+    JavaRandom& random,
+    BiomeId biome,
+    int x,
+    int z)
+{
+    // The legacy enum only has dandelion/poppy, but consume each biome's
+    // exact picker RNG so all following features retain vanilla positions.
+    if (biome == VanillaBiomes::Swampland ||
+        biome == VanillaBiomes::SwamplandMountains)
+        return BlockType::Rose; // blue orchid fallback
+
+    if (biome == VanillaBiomes::FlowerForest)
+    {
+        const double normalized = std::clamp(
+            (1.0 + biomeGrassNoise().value(
+                static_cast<double>(x) / 48.0,
+                static_cast<double>(z) / 48.0)) / 2.0,
+            0.0,
+            0.9999);
+        const int flowerIndex = static_cast<int>(normalized * 10.0);
+        return flowerIndex == 0 ? BlockType::Dandelion : BlockType::Rose;
+    }
+
+    if (isPlainsClass(biome))
+    {
+        const double noise = biomeGrassNoise().value(
+            static_cast<double>(x) / 200.0,
+            static_cast<double>(z) / 200.0);
+        if (noise < -0.8)
+        {
+            (void)random.nextInt(4); // one of four tulips
+            return BlockType::Rose;
+        }
+        if (random.nextInt(3) > 0)
+        {
+            (void)random.nextInt(3); // poppy / houstonia / oxeye
+            return BlockType::Rose;
+        }
+        return BlockType::Dandelion;
+    }
+
+    return random.nextInt(3) > 0
+        ? BlockType::Dandelion
+        : BlockType::Rose;
+}
+
+BlockType grassForBiome(JavaRandom& random, BiomeId biome)
+{
+    if (isTaigaClass(biome))
+        return random.nextInt(5) > 0 ? BlockType::Fern : BlockType::TallGrass;
+    if (isJungleClass(biome))
+        return random.nextInt(4) == 0 ? BlockType::Fern : BlockType::TallGrass;
+    return BlockType::TallGrass;
 }
 }
 
@@ -54,18 +559,19 @@ void PopulationGenerator::populate(
     WorldGenerationContext& context) const
 {
     JavaRandom seedRandom(worldSeed_);
-    const std::int64_t xMultiplier =
-        makeOdd(seedRandom.nextLong());
-    const std::int64_t zMultiplier =
-        makeOdd(seedRandom.nextLong());
+    const std::int64_t xMultiplier = makeOdd(seedRandom.nextLong());
+    const std::int64_t zMultiplier = makeOdd(seedRandom.nextLong());
 
     const LakeGenerator waterLake(BlockType::Water);
-    const ClayGenerator clay(4);
+    const LakeGenerator lavaLake(BlockType::Lava);
+    const DungeonGenerator dungeons;
     const OreGenerator ores;
+    const ClayGenerator clay(4);
     const TreeGenerator trees;
     const DecorationGenerator decorations;
-    const DungeonGenerator dungeons;
-    const LakeGenerator lavaLake(BlockType::Lava);
+    const MinableGenerator mesaGold(BlockType::GoldOre, 9);
+    const MinableGenerator silverfishRngPlaceholder(BlockType::Stone, 9);
+
     const auto generateTree = [&context, &trees](
         JavaRandom& random,
         BiomeId biome,
@@ -75,330 +581,596 @@ void PopulationGenerator::populate(
     {
         context.beginIsolatedFeature();
         const bool generated = trees.generateForBiome(
-            context, random, biome, x, y, z
-        );
+            context, random, biome, x, y, z);
         context.finishIsolatedFeature(generated);
         return generated;
     };
 
-    // Biome decoration starts features at +8 inside each source chunk, so a
-    // target chunk can receive features from itself and its negative-X/Z
-    // neighbours. Replaying those four origin chunks keeps borders continuous
-    // while allowing each worker job to publish one immutable target chunk.
-    for (int sourceChunkX =
-             targetChunk.getChunkX() - 1;
-         sourceChunkX <= targetChunk.getChunkX();
-         ++sourceChunkX)
+    // BiomeDecorator positions are offset +8 from the population chunk, so a
+    // target chunk can receive decoration from itself and its -X/-Z neighbors.
+    for (int sourceChunkX = targetChunk.getChunkX() - 1;
+         sourceChunkX <= targetChunk.getChunkX(); ++sourceChunkX)
     {
-        for (int sourceChunkZ =
-                 targetChunk.getChunkZ() - 1;
-             sourceChunkZ <= targetChunk.getChunkZ();
-             ++sourceChunkZ)
+        for (int sourceChunkZ = targetChunk.getChunkZ() - 1;
+             sourceChunkZ <= targetChunk.getChunkZ(); ++sourceChunkZ)
         {
             JavaRandom random(populationSeed(
                 sourceChunkX,
                 xMultiplier,
                 sourceChunkZ,
                 zMultiplier,
-                worldSeed_
-            ));
+                worldSeed_));
 
-            const int originX = sourceChunkX * Chunk::WIDTH;
-            const int originZ = sourceChunkZ * Chunk::DEPTH;
-
-            if (random.nextInt(4) == 0)
-            {
-                waterLake.generate(
-                    context,
-                    random,
-                    originX + random.nextInt(16) + 8,
-                    random.nextInt(Chunk::HEIGHT),
-                    originZ + random.nextInt(16) + 8
-                );
-            }
-
-            if (random.nextInt(8) == 0)
-            {
-                const int lakeY = random.nextInt(random.nextInt(248) + 8);
-                if (lakeY < 63 || random.nextInt(10) == 0)
-                    lavaLake.generate(context, random,
-                        originX + random.nextInt(16) + 8,
-                        lakeY,
-                        originZ + random.nextInt(16) + 8);
-            }
-
-            for (int attempt=0; attempt<8; ++attempt)
-                dungeons.generate(context, random,
-                    originX + random.nextInt(16) + 8,
-                    random.nextInt(Chunk::HEIGHT),
-                    originZ + random.nextInt(16) + 8);
-
-            ores.generate(
-                context,
-                random,
-                originX,
-                originZ
-            );
-
-            const int biomeSampleX = originX + 16;
-            const int biomeSampleZ = originZ + 16;
+            const int originX = sourceChunkX * 16;
+            const int originZ = sourceChunkZ * 16;
             const ClimateSample climate =
-                context.sampleClimate(biomeSampleX, biomeSampleZ);
-
-            const BiomeDefinition* biomeDefinition =
+                context.sampleClimate(originX + 16, originZ + 16);
+            const BiomeDefinition* biome =
                 BiomeRegistry::active().find(climate.biome);
+            const bool village = villageStarts(
+                worldSeed_, sourceChunkX, sourceChunkZ);
 
-            const int sandPatches = biomeDefinition == nullptr
-                ? 3 : biomeDefinition->sandPatchesPerChunk;
-            for (int attempt = 0; attempt < sandPatches; ++attempt)
+            // ChunkGeneratorOverworld::populate after structure postprocess.
+            if (climate.biome != VanillaBiomes::Desert &&
+                climate.biome != VanillaBiomes::DesertHills &&
+                !village && random.nextInt(4) == 0)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int y = random.nextInt(256);
+                const int z = originZ + random.nextInt(16) + 8;
+                waterLake.generate(context, random, x, y, z);
+            }
+
+            if (!village && random.nextInt(8) == 0)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int nestedHeight = random.nextInt(248) + 8;
+                const int y = random.nextInt(nestedHeight);
+                const int z = originZ + random.nextInt(16) + 8;
+                if (y < 63 || random.nextInt(10) == 0)
+                    lavaLake.generate(context, random, x, y, z);
+            }
+
+            for (int attempt = 0; attempt < 8; ++attempt)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int y = random.nextInt(256);
+                const int z = originZ + random.nextInt(16) + 8;
+                dungeons.generate(context, random, x, y, z);
+            }
+
+            int flowerCount = biome ? biome->flowersPerChunk : 2;
+            int grassCount = biome ? biome->grassPerChunk : 1;
+
+            // Biome-specific decorate hooks that run BEFORE BiomeDecorator.
+            if (isPlainsClass(climate.biome))
+            {
+                const double plainsNoise = biomeGrassNoise().value(
+                    static_cast<double>(originX + 8) / 200.0,
+                    static_cast<double>(originZ + 8) / 200.0);
+                if (plainsNoise < -0.8)
+                {
+                    flowerCount = 15;
+                    grassCount = 5;
+                }
+                else
+                {
+                    flowerCount = 4;
+                    grassCount = 10;
+                    for (int i = 0; i < 7; ++i)
+                    {
+                        const int x = originX + random.nextInt(16) + 8;
+                        const int z = originZ + random.nextInt(16) + 8;
+                        const int bound = context.getHeightValue(x, z) + 32;
+                        if (bound > 0)
+                        {
+                            const int y = random.nextInt(bound);
+                            (void)consumeDoublePlantGenerator(
+                                context, random, x, y, z);
+                        }
+                    }
+                }
+                if (climate.biome == VanillaBiomes::SunflowerPlains)
+                {
+                    for (int i = 0; i < 10; ++i)
+                    {
+                        const int x = originX + random.nextInt(16) + 8;
+                        const int z = originZ + random.nextInt(16) + 8;
+                        const int bound = context.getHeightValue(x, z) + 32;
+                        if (bound > 0)
+                        {
+                            const int y = random.nextInt(bound);
+                            (void)consumeDoublePlantGenerator(
+                                context, random, x, y, z);
+                        }
+                    }
+                }
+            }
+
+            if (isForestClass(climate.biome))
+            {
+                if (isRoofedForest(climate.biome))
+                {
+                    for (int gridX = 0; gridX < 4; ++gridX)
+                    {
+                        for (int gridZ = 0; gridZ < 4; ++gridZ)
+                        {
+                            const int x = originX + gridX * 4 + 9 +
+                                random.nextInt(3);
+                            const int z = originZ + gridZ * 4 + 9 +
+                                random.nextInt(3);
+                            const int y = context.getHeightValue(x, z);
+                            if (random.nextInt(20) == 0)
+                            {
+                                context.beginIsolatedFeature();
+                                const bool generated =
+                                    decorations.generateBigMushroom(
+                                        context, random, x, y, z);
+                                context.finishIsolatedFeature(generated);
+                            }
+                            else
+                            {
+                                (void)generateTree(
+                                    random, climate.biome, x, y, z);
+                            }
+                        }
+                    }
+                }
+
+                int doublePlantCount = random.nextInt(5) - 3;
+                if (climate.biome == VanillaBiomes::FlowerForest)
+                    doublePlantCount += 2;
+                for (int i = 0; i < doublePlantCount; ++i)
+                {
+                    (void)random.nextInt(3); // lilac / rose / peony
+                    for (int retry = 0; retry < 5; ++retry)
+                    {
+                        const int x = originX + random.nextInt(16) + 8;
+                        const int z = originZ + random.nextInt(16) + 8;
+                        const int bound = context.getHeightValue(x, z) + 32;
+                        if (bound <= 0)
+                            continue;
+                        const int y = random.nextInt(bound);
+                        if (consumeDoublePlantGenerator(
+                                context, random, x, y, z))
+                            break;
+                    }
+                }
+            }
+
+            if (climate.biome == VanillaBiomes::Savanna ||
+                climate.biome == VanillaBiomes::SavannaPlateau)
+            {
+                for (int i = 0; i < 7; ++i)
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    const int bound = context.getHeightValue(x, z) + 32;
+                    if (bound > 0)
+                    {
+                        const int y = random.nextInt(bound);
+                        (void)consumeDoublePlantGenerator(
+                            context, random, x, y, z);
+                    }
+                }
+            }
+
+            if (isTaigaClass(climate.biome))
+            {
+                if (isMegaTaiga(climate.biome))
+                {
+                    const int rockCount = random.nextInt(3);
+                    for (int i = 0; i < rockCount; ++i)
+                    {
+                        const int x = originX + random.nextInt(16) + 8;
+                        const int z = originZ + random.nextInt(16) + 8;
+                        generateForestRock(
+                            context,
+                            random,
+                            x,
+                            context.getHeightValue(x, z),
+                            z);
+                    }
+                }
+
+                for (int i = 0; i < 7; ++i)
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    const int bound = context.getHeightValue(x, z) + 32;
+                    if (bound > 0)
+                    {
+                        const int y = random.nextInt(bound);
+                        (void)consumeDoublePlantGenerator(
+                            context, random, x, y, z);
+                    }
+                }
+            }
+
+            if (climate.biome == VanillaBiomes::IcePlainsSpikes)
+            {
+                for (int i = 0; i < 3; ++i)
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    generateIceSpike(
+                        context,
+                        random,
+                        x,
+                        context.getHeightValue(x, z),
+                        z);
+                }
+                for (int i = 0; i < 2; ++i)
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    generateIcePath(
+                        context,
+                        random,
+                        x,
+                        context.getHeightValue(x, z),
+                        z);
+                }
+            }
+
+            // BiomeDecorator::generateOres, including Mesa.Decorator's extra
+            // gold immediately after the standard ore pass.
+            ores.generate(context, random, originX, originZ);
+            if (isMesa(climate.biome))
+            {
+                for (int i = 0; i < 20; ++i)
+                {
+                    const int x = originX + random.nextInt(16);
+                    const int y = 32 + random.nextInt(48);
+                    const int z = originZ + random.nextInt(16);
+                    mesaGold.generate(context, random, x, y, z);
+                }
+            }
+
+            const int sandPatches = biome ? biome->sandPatchesPerChunk : 3;
+            for (int i = 0; i < sandPatches; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                decorations.generateSurfacePatch(
-                    context, random, BlockType::Sand,
-                    x, context.getHeightValue(x, z) - 1, z, 7
-                );
+                generateSandPatch(
+                    context,
+                    random,
+                    BlockType::Sand,
+                    x,
+                    context.getHeightValue(x, z) - 1,
+                    z,
+                    7);
             }
-            const int clayPatches = biomeDefinition == nullptr
-                ? 1 : biomeDefinition->clayPatchesPerChunk;
-            for (int attempt = 0; attempt < clayPatches; ++attempt)
+
+            const int clayPatches = biome ? biome->clayPatchesPerChunk : 1;
+            for (int i = 0; i < clayPatches; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
                 clay.generate(
-                    context, random, x,
-                    context.getHeightValue(x, z) - 1, z
-                );
+                    context,
+                    random,
+                    x,
+                    context.getHeightValue(x, z) - 1,
+                    z);
             }
-            const int gravelPatches = biomeDefinition == nullptr
-                ? 1 : biomeDefinition->gravelPatchesPerChunk;
-            for (int attempt = 0; attempt < gravelPatches; ++attempt)
+
+            const int gravelPatches = biome ? biome->gravelPatchesPerChunk : 1;
+            for (int i = 0; i < gravelPatches; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                decorations.generateSurfacePatch(
-                    context, random, BlockType::Gravel,
-                    x, context.getHeightValue(x, z) - 1, z, 6
-                );
+                generateSandPatch(
+                    context,
+                    random,
+                    BlockType::Gravel,
+                    x,
+                    context.getHeightValue(x, z) - 1,
+                    z,
+                    6);
             }
-            if (biomeDefinition != nullptr &&
-                biomeDefinition->roofedForestDecoration)
+
+            int treeCount = biome ? biome->treesPerChunk : 0;
+            if (random.nextFloat() < (biome ? biome->extraTreeChance : 0.1F))
+                ++treeCount;
+            for (int i = 0; i < treeCount; ++i)
             {
-                for (int gridX = 0; gridX < 4; ++gridX)
-                {
-                    for (int gridZ = 0; gridZ < 4; ++gridZ)
-                    {
-                        const int treeX = originX + gridX * 4 + 9 +
-                            random.nextInt(3);
-                        const int treeZ = originZ + gridZ * 4 + 9 +
-                            random.nextInt(3);
-                        if (random.nextInt(20) == 0)
-                        {
-                            context.beginIsolatedFeature();
-                            const bool generated = decorations.generateBigMushroom(
-                                context, random, treeX,
-                                context.getHeightValue(treeX, treeZ), treeZ
-                            );
-                            context.finishIsolatedFeature(generated);
-                            continue;
-                        }
-                        generateTree(
-                            random, climate.biome,
-                            treeX,
-                            context.getHeightValue(treeX, treeZ),
-                            treeZ
-                        );
-                    }
-                }
-            }
-            else
-            {
-                int treeCount = biomeDefinition == nullptr
-                    ? 0
-                    : biomeDefinition->treesPerChunk;
-                if (random.nextFloat() < (biomeDefinition == nullptr
-                        ? 0.1f
-                        : biomeDefinition->extraTreeChance))
-                    ++treeCount;
-
-                for (int attempt = 0; attempt < treeCount; ++attempt)
-                {
-                    const int treeX = originX + random.nextInt(16) + 8;
-                    const int treeZ = originZ + random.nextInt(16) + 8;
-                    const int treeY = context.getHeightValue(treeX, treeZ);
-
-                    const bool generated = generateTree(
-                        random, climate.biome, treeX, treeY, treeZ
-                    );
-                    if (generated &&
-                        (climate.biome == VanillaBiomes::Jungle ||
-                         climate.biome == VanillaBiomes::JungleHills ||
-                         climate.biome == VanillaBiomes::JungleMountains))
-                    {
-                        decorations.generateCocoa(
-                            context, random, treeX, treeY, treeZ
-                        );
-                    }
-                }
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                (void)generateTree(
+                    random,
+                    climate.biome,
+                    x,
+                    context.getHeightValue(x, z),
+                    z);
             }
 
-            const int bigMushroomCount = biomeDefinition == nullptr
-                ? 0 : biomeDefinition->bigMushroomsPerChunk;
-            for (int attempt = 0; attempt < bigMushroomCount; ++attempt)
+            const int bigMushrooms = biome ? biome->bigMushroomsPerChunk : 0;
+            for (int i = 0; i < bigMushrooms; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
                 context.beginIsolatedFeature();
                 const bool generated = decorations.generateBigMushroom(
-                    context, random, x, context.getHeightValue(x, z), z
-                );
+                    context,
+                    random,
+                    x,
+                    context.getHeightValue(x, z),
+                    z);
                 context.finishIsolatedFeature(generated);
             }
 
-            const int flowerCount = biomeDefinition == nullptr
-                ? 0
-                : biomeDefinition->flowersPerChunk;
             for (int i = 0; i < flowerCount; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                const int maximumY = std::min(
-                    Chunk::HEIGHT,
-                    context.getHeightValue(x, z) + 32
-                );
+                const int bound = context.getHeightValue(x, z) + 32;
+                if (bound <= 0)
+                    continue;
+                const int y = random.nextInt(bound);
+                const BlockType flower = pickFlowerForBiome(
+                    random, climate.biome, x, z);
                 decorations.generateFlowers(
-                    context, random,
-                    random.nextInt(3) == 0 ? BlockType::Rose
-                                           : BlockType::Dandelion,
-                    x, maximumY > 0 ? random.nextInt(maximumY) : 0, z
-                );
+                    context, random, flower, x, y, z);
             }
 
-            const int grassCount = biomeDefinition == nullptr
-                ? 0
-                : biomeDefinition->grassPerChunk;
             for (int i = 0; i < grassCount; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                const int maximumY = std::min(
-                    Chunk::HEIGHT,
-                    context.getHeightValue(x, z) * 2
-                );
-                BlockType grass = BlockType::TallGrass;
-                if ((climate.biome == VanillaBiomes::Taiga ||
-                     climate.biome == VanillaBiomes::TaigaHills ||
-                     climate.biome == VanillaBiomes::ColdTaiga ||
-                     climate.biome == VanillaBiomes::ColdTaigaHills) &&
-                    random.nextInt(5) != 0)
-                    grass = BlockType::Fern;
-                else if ((climate.biome == VanillaBiomes::Jungle ||
-                          climate.biome == VanillaBiomes::JungleHills) &&
-                         random.nextInt(4) == 0)
-                    grass = BlockType::Fern;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound <= 0)
+                    continue;
+                const int y = random.nextInt(bound);
+                const BlockType grass = grassForBiome(random, climate.biome);
                 decorations.generateTallGrass(
-                    context, random, grass, x,
-                    maximumY > 0 ? random.nextInt(maximumY) : 0, z
-                );
+                    context, random, grass, x, y, z);
             }
 
-            const int deadBushes = biomeDefinition == nullptr
-                ? 0 : biomeDefinition->deadBushesPerChunk;
+            const int deadBushes = biome ? biome->deadBushesPerChunk : 0;
             for (int i = 0; i < deadBushes; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound <= 0)
+                    continue;
+                const int y = random.nextInt(bound);
                 decorations.generateFlowers(
-                    context, random, BlockType::DeadBush,
-                    x, random.nextInt(std::max(1,
-                        std::min(Chunk::HEIGHT,
-                            context.getHeightValue(x, z) * 2))), z
-                );
+                    context, random, BlockType::DeadBush, x, y, z);
             }
 
-            const int mushroomCount = biomeDefinition == nullptr
-                ? 0 : biomeDefinition->mushroomsPerChunk;
-            for (int i = 0; i < mushroomCount; ++i)
+            const int waterLilies =
+                (climate.biome == VanillaBiomes::Swampland ||
+                 climate.biome == VanillaBiomes::SwamplandMountains)
+                    ? 4 : 0;
+            for (int i = 0; i < waterLilies; ++i)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound <= 0)
+                    continue;
+                int y = random.nextInt(bound);
+                while (y > 0 && context.getBlock(x, y - 1, z) == BlockType::Air)
+                    --y;
+
+                // WorldGenWaterlily: ten scatter attempts.
+                const auto lily = namedState("waterlily", BlockType::Air);
+                for (int attempt = 0; attempt < 10; ++attempt)
+                {
+                    const int px = x + random.nextInt(8) - random.nextInt(8);
+                    const int py = y + random.nextInt(4) - random.nextInt(4);
+                    const int pz = z + random.nextInt(8) - random.nextInt(8);
+                    if (!lily.isAir() && py > 0 &&
+                        context.getBlockState(px, py, pz).isAir() &&
+                        context.getBlock(px, py - 1, pz) == BlockType::Water)
+                        context.setBlockState(px, py, pz, lily);
+                }
+            }
+
+            const int mushrooms = biome ? biome->mushroomsPerChunk : 0;
+            for (int i = 0; i < mushrooms; ++i)
             {
                 if (random.nextInt(4) == 0)
                 {
                     const int x = originX + random.nextInt(16) + 8;
                     const int z = originZ + random.nextInt(16) + 8;
-                    decorations.generateFlowers(context, random,
-                        BlockType::BrownMushroom, x,
-                        context.getHeightValue(x, z), z);
+                    decorations.generateFlowers(
+                        context,
+                        random,
+                        BlockType::BrownMushroom,
+                        x,
+                        context.getHeightValue(x, z),
+                        z);
                 }
                 if (random.nextInt(8) == 0)
-                    decorations.generateFlowers(context,random,BlockType::RedMushroom,
-                        originX+random.nextInt(16)+8,random.nextInt(Chunk::HEIGHT),
-                        originZ+random.nextInt(16)+8);
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    const int bound = context.getHeightValue(x, z) * 2;
+                    if (bound > 0)
+                    {
+                        const int y = random.nextInt(bound);
+                        decorations.generateFlowers(
+                            context,
+                            random,
+                            BlockType::RedMushroom,
+                            x,
+                            y,
+                            z);
+                    }
+                }
             }
-            if(random.nextInt(4)==0)
-                decorations.generateFlowers(context,random,BlockType::BrownMushroom,
-                    originX+random.nextInt(16)+8,random.nextInt(Chunk::HEIGHT),
-                    originZ+random.nextInt(16)+8);
-            if(random.nextInt(8)==0)
-                decorations.generateFlowers(context,random,BlockType::RedMushroom,
-                    originX+random.nextInt(16)+8,random.nextInt(Chunk::HEIGHT),
-                    originZ+random.nextInt(16)+8);
-            if(random.nextInt(32)==0)
-                decorations.generatePumpkins(context,random,
-                    originX+random.nextInt(16)+8,random.nextInt(Chunk::HEIGHT),
-                    originZ+random.nextInt(16)+8);
 
-            const int reedCount = (biomeDefinition == nullptr
-                ? 0 : biomeDefinition->reedsPerChunk) + 10;
-            for (int i = 0; i < reedCount; ++i)
+            if (random.nextInt(4) == 0)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                decorations.generateReeds(
-                    context, random, x,
-                    std::min(Chunk::HEIGHT - 1,
-                        context.getHeightValue(x, z) * 2), z
-                );
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generateFlowers(
+                        context,
+                        random,
+                        BlockType::BrownMushroom,
+                        x,
+                        y,
+                        z);
+                }
             }
-            const int cactusCount = biomeDefinition == nullptr
-                ? 0 : biomeDefinition->cactiPerChunk;
-            for (int i = 0; i < cactusCount; ++i)
+
+            if (random.nextInt(8) == 0)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                decorations.generateCactus(
-                    context, random, x,
-                    std::min(Chunk::HEIGHT - 1,
-                        context.getHeightValue(x, z) * 2), z
-                );
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generateFlowers(
+                        context,
+                        random,
+                        BlockType::RedMushroom,
+                        x,
+                        y,
+                        z);
+                }
             }
-            const int melonCount = biomeDefinition == nullptr
-                ? 0 : biomeDefinition->melonsPerChunk;
-            for (int i = 0; i < melonCount; ++i)
+
+            const int configuredReeds = biome ? biome->reedsPerChunk : 0;
+            for (int i = 0; i < configuredReeds; ++i)
             {
                 const int x = originX + random.nextInt(16) + 8;
                 const int z = originZ + random.nextInt(16) + 8;
-                decorations.generateMelons(
-                    context, random, x, random.nextInt(std::max(1,
-                        std::min(Chunk::HEIGHT,
-                            context.getHeightValue(x, z) * 2))), z
-                );
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generateReeds(context, random, x, y, z);
+                }
             }
-            const int vineCount = biomeDefinition == nullptr
-                ? 0 : biomeDefinition->vinesPerChunk;
-            for (int i = 0; i < vineCount; ++i)
-                decorations.generateVines(
-                    context, random,
-                    originX + random.nextInt(16) + 8,
-                    128,
-                    originZ + random.nextInt(16) + 8
-                );
+            for (int i = 0; i < 10; ++i)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generateReeds(context, random, x, y, z);
+                }
+            }
+
+            if (random.nextInt(32) == 0)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generatePumpkins(context, random, x, y, z);
+                }
+            }
+
+            const int cacti = biome ? biome->cactiPerChunk : 0;
+            for (int i = 0; i < cacti; ++i)
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generateCactus(context, random, x, y, z);
+                }
+            }
+
+            if (!biome || biome->generateFalls)
+            {
+                for (int i = 0; i < 50; ++i)
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    const int upper = random.nextInt(248) + 8;
+                    const int y = random.nextInt(upper);
+                    generateSpring(context, BlockType::Water, x, y, z);
+                }
+                for (int i = 0; i < 20; ++i)
+                {
+                    const int x = originX + random.nextInt(16) + 8;
+                    const int z = originZ + random.nextInt(16) + 8;
+                    const int first = random.nextInt(240) + 8;
+                    const int second = random.nextInt(first) + 8;
+                    const int y = random.nextInt(second);
+                    generateSpring(context, BlockType::Lava, x, y, z);
+                }
+            }
+
+            // Biome hooks that run AFTER BiomeDecorator.
+            if (isJungleClass(climate.biome))
+            {
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                const int bound = context.getHeightValue(x, z) * 2;
+                if (bound > 0)
+                {
+                    const int y = random.nextInt(bound);
+                    decorations.generateMelons(context, random, x, y, z);
+                }
+                for (int i = 0; i < 50; ++i)
+                {
+                    const int vineX = originX + random.nextInt(16) + 8;
+                    const int vineZ = originZ + random.nextInt(16) + 8;
+                    decorations.generateVines(
+                        context, random, vineX, 128, vineZ);
+                }
+            }
+
+            if (isHillsClass(climate.biome))
+            {
+                const int emeralds = 3 + random.nextInt(6);
+                for (int i = 0; i < emeralds; ++i)
+                {
+                    const int x = originX + random.nextInt(16);
+                    const int y = random.nextInt(28) + 4;
+                    const int z = originZ + random.nextInt(16);
+                    if (context.getBlock(x, y, z) == BlockType::Stone)
+                        context.setBlockState(
+                            x, y, z, namedState("emerald_ore", BlockType::Stone));
+                }
+                for (int i = 0; i < 7; ++i)
+                {
+                    const int x = originX + random.nextInt(16);
+                    const int y = random.nextInt(64);
+                    const int z = originZ + random.nextInt(16);
+                    silverfishRngPlaceholder.generate(
+                        context, random, x, y, z);
+                }
+            }
+
+            if (climate.biome == VanillaBiomes::Swampland ||
+                climate.biome == VanillaBiomes::SwamplandMountains)
+            {
+                // BiomeSwamp's 1-in-64 fossil hook. The clone currently has no
+                // fossil template loader; keep the exact chance draw here.
+                (void)random.nextInt(64);
+            }
+
+            // WorldEntitySpawner consumes RNG between biome.decorate and the
+            // final freeze/snow pass in vanilla. Mob worldgen spawning belongs
+            // to the entity subsystem, not this terrain-only port.
+
+            // ChunkGeneratorOverworld shifts blockpos by +8 before the 16x16
+            // precipitation-height freeze/snow loop.
+            decorations.freezeAndSnow(
+                context,
+                originX + 8,
+                originZ + 8,
+                16,
+                16);
         }
     }
-
-    decorations.freezeAndSnow(
-        context,
-        targetChunk.getWorldOriginX(),
-        targetChunk.getWorldOriginZ(),
-        Chunk::WIDTH,
-        Chunk::DEPTH
-    );
 }

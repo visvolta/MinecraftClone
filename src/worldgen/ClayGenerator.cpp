@@ -5,11 +5,9 @@
 #include "worldgen/WorldGenerationContext.h"
 
 #include <algorithm>
-#include <cmath>
-#include <numbers>
 
 ClayGenerator::ClayGenerator(int depositSize)
-    : depositSize_(std::max(1, depositSize))
+    : depositSize_(std::max(3, depositSize))
 {
 }
 
@@ -20,97 +18,29 @@ bool ClayGenerator::generate(
     int worldY,
     int worldZ) const
 {
-    if (!isLiquid(context.getBlock(worldX, worldY, worldZ)))
-    {
+    // WorldGenClay (1.12.2): the selected top-solid-or-liquid position must
+    // actually be water. The generator is a shallow circular dirt/clay patch,
+    // not an ore-style interpolated ellipsoid.
+    if (context.getBlock(worldX, worldY, worldZ) != BlockType::Water)
         return false;
-    }
 
-    const float angle =
-        random.nextFloat() * static_cast<float>(std::numbers::pi);
-
-    const double startX =
-        static_cast<double>(worldX + 8) +
-        std::sin(angle) * static_cast<double>(depositSize_) / 8.0;
-    const double endX =
-        static_cast<double>(worldX + 8) -
-        std::sin(angle) * static_cast<double>(depositSize_) / 8.0;
-
-    const double startZ =
-        static_cast<double>(worldZ + 8) +
-        std::cos(angle) * static_cast<double>(depositSize_) / 8.0;
-    const double endZ =
-        static_cast<double>(worldZ + 8) -
-        std::cos(angle) * static_cast<double>(depositSize_) / 8.0;
-
-    const double startY =
-        static_cast<double>(worldY + random.nextInt(3) + 2);
-    const double endY =
-        static_cast<double>(worldY + random.nextInt(3) + 2);
-
-    for (int step = 0; step <= depositSize_; ++step)
+    const int radius = random.nextInt(depositSize_ - 2) + 2;
+    for (int x = worldX - radius; x <= worldX + radius; ++x)
     {
-        const double progress =
-            static_cast<double>(step) / static_cast<double>(depositSize_);
-
-        const double centreX = startX + (endX - startX) * progress;
-        const double centreY = startY + (endY - startY) * progress;
-        const double centreZ = startZ + (endZ - startZ) * progress;
-
-        const double randomScale =
-            random.nextDouble() * static_cast<double>(depositSize_) / 16.0;
-
-        const double horizontalDiameter =
-            (std::sin(
-                 static_cast<double>(step) *
-                 std::numbers::pi /
-                 static_cast<double>(depositSize_)) +
-             1.0) *
-                randomScale +
-            1.0;
-
-        const double verticalDiameter = horizontalDiameter;
-
-        const int minX =
-            static_cast<int>(std::floor(centreX - horizontalDiameter / 2.0));
-        const int maxX =
-            static_cast<int>(std::floor(centreX + horizontalDiameter / 2.0));
-        const int minY =
-            static_cast<int>(std::floor(centreY - verticalDiameter / 2.0));
-        const int maxY =
-            static_cast<int>(std::floor(centreY + verticalDiameter / 2.0));
-        const int minZ =
-            static_cast<int>(std::floor(centreZ - horizontalDiameter / 2.0));
-        const int maxZ =
-            static_cast<int>(std::floor(centreZ + horizontalDiameter / 2.0));
-
-        for (int x = minX; x <= maxX; ++x)
+        for (int z = worldZ - radius; z <= worldZ + radius; ++z)
         {
-            for (int y = minY; y <= maxY; ++y)
-            {
-                for (int z = minZ; z <= maxZ; ++z)
-                {
-                    const double normalizedX =
-                        (static_cast<double>(x) + 0.5 - centreX) /
-                        (horizontalDiameter / 2.0);
-                    const double normalizedY =
-                        (static_cast<double>(y) + 0.5 - centreY) /
-                        (verticalDiameter / 2.0);
-                    const double normalizedZ =
-                        (static_cast<double>(z) + 0.5 - centreZ) /
-                        (horizontalDiameter / 2.0);
+            const int dx = x - worldX;
+            const int dz = z - worldZ;
+            if (dx * dx + dz * dz > radius * radius)
+                continue;
 
-                    if (normalizedX * normalizedX +
-                                normalizedY * normalizedY +
-                                normalizedZ * normalizedZ <
-                            1.0 &&
-                        context.getBlock(x, y, z) == BlockType::Sand)
-                    {
-                        context.setBlock(x, y, z, BlockType::Clay);
-                    }
-                }
+            for (int y = worldY - 1; y <= worldY + 1; ++y)
+            {
+                const BlockType current = context.getBlock(x, y, z);
+                if (current == BlockType::Dirt || current == BlockType::Clay)
+                    context.setBlock(x, y, z, BlockType::Clay);
             }
         }
     }
-
     return true;
 }

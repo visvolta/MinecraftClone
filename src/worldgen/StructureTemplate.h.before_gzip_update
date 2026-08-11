@@ -50,15 +50,7 @@ public:
     std::vector<TemplatePaletteEntry> palette;
     std::vector<TemplateBlock> blocks;
 
-    // Loads both vanilla gzip-compressed structure NBT and raw/uncompressed NBT.
-    [[nodiscard]] static StructureTemplate load(const std::filesystem::path& file);
-
-    // Compatibility alias retained for existing callers. Compression is
-    // auto-detected even when this older entry point is used.
-    [[nodiscard]] static StructureTemplate loadUncompressed(const std::filesystem::path& file)
-    {
-        return load(file);
-    }
+    [[nodiscard]] static StructureTemplate loadUncompressed(const std::filesystem::path& file);
 
     // Exact Template 1.12.2 coordinate helpers (Mirror.NONE). Template block
     // transforms rotate around local (0,0,0), so CW/CCW rotations can produce

@@ -86,16 +86,7 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 
-# Vanilla structure templates are gzip-compressed NBT.
-set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG v1.3.1
-    GIT_SHALLOW TRUE
-)
-
-FetchContent_MakeAvailable(glfw glm glad imgui nlohmann_json zlib)
+FetchContent_MakeAvailable(glfw glm glad imgui nlohmann_json)
 
 glad_add_library(
     glad_gl_core_33
@@ -214,7 +205,6 @@ target_include_directories(minecraft_world PUBLIC
 target_link_libraries(minecraft_world PUBLIC
     minecraft_content
     glm::glm
-    zlibstatic
 )
 
 add_library(imgui STATIC

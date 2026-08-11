@@ -270,15 +270,23 @@ bool generateDoublePlant(
     // inherits BlockBush, so the lower half requires grass/dirt/farmland and
     // the upper position must be air. The dirt test intentionally includes
     // all 1.12 dirt variants because vanilla checks the block, not metadata.
-    bool generated = false;
-    const std::array<mc112::Property, 2> lowerProperties{{
-        {"variant", std::string(variant)}, {"half", "lower"}}};
-    const std::array<mc112::Property, 2> upperProperties{{
-        {"variant", std::string(variant)}, {"half", "upper"}};
-    const auto lowerState = mc112::vanilla112State(
-        "minecraft:double_plant", lowerProperties);
-    const auto upperState = mc112::vanilla112State(
-        "minecraft:double_plant", upperProperties);
+bool generated = false;
+
+const std::array<mc112::Property, 2> lowerProperties = {
+    mc112::Property{"variant", std::string(variant)},
+    mc112::Property{"half", "lower"}
+};
+
+const std::array<mc112::Property, 2> upperProperties = {
+    mc112::Property{"variant", std::string(variant)},
+    mc112::Property{"half", "upper"}
+};
+
+const auto lowerState = mc112::vanilla112State(
+    "minecraft:double_plant", lowerProperties);
+
+const auto upperState = mc112::vanilla112State(
+    "minecraft:double_plant", upperProperties);
 
     for (int attempt = 0; attempt < 64; ++attempt)
     {

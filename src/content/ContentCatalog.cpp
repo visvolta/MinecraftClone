@@ -11,7 +11,7 @@ namespace
 {
 const ContentCatalog* ActiveCatalog = nullptr;
 
-bool isFrontFace(BlockFace face, std::uint8_t metadata) noexcept
+bool isFrontFace(BlockFace face, std::uint16_t metadata) noexcept
 {
     return (metadata == 2 && face == BlockFace::Back) ||
            (metadata == 3 && face == BlockFace::Front) ||
@@ -21,27 +21,40 @@ bool isFrontFace(BlockFace face, std::uint8_t metadata) noexcept
 }
 
 bool BlockPropertyDefinition::accepts(
-    std::uint8_t properties) const noexcept
+    std::uint16_t properties) const noexcept
 {
-    const std::uint8_t value = properties & mask;
+    const std::uint16_t value = properties & mask;
     return mask != 0 && value >= minimumValue && value <= maximumValue;
 }
 
 bool BlockStateSchema::accepts(BlockState state) const noexcept
 {
-    std::uint8_t knownMask = 0;
+    if (!states.empty())
+        return state.properties() < states.size();
+
+    std::uint16_t knownMask = 0;
     for (const BlockPropertyDefinition& property : properties)
     {
         if ((knownMask & property.mask) != 0 || !property.accepts(state.properties()))
             return false;
         knownMask |= property.mask;
     }
-    return (state.properties() & static_cast<std::uint8_t>(~knownMask)) == 0;
+    return (state.properties() & static_cast<std::uint16_t>(~knownMask)) == 0;
+}
+
+std::size_t BlockStateSchema::stateCount() const noexcept
+{
+    if (!states.empty())
+        return states.size();
+    std::size_t highest = defaultProperties;
+    for (const BlockPropertyDefinition& property : properties)
+        highest = std::max(highest, static_cast<std::size_t>(property.maximumValue));
+    return highest + 1U;
 }
 
 const core::ResourceLocation* BlockTextures::resolve(
     BlockFace face,
-    std::uint8_t metadata) const noexcept
+    std::uint16_t metadata) const noexcept
 {
     const auto value = [](const auto& candidate) -> const core::ResourceLocation*
     {
@@ -243,7 +256,7 @@ BlockState ContentCatalog::defaultState(
 
 std::optional<BlockState> ContentCatalog::state(
     const core::ResourceLocation& name,
-    std::uint8_t properties) const noexcept
+    std::uint16_t properties) const noexcept
 {
     const auto* entry = blocks_.entry(name);
     if (entry == nullptr || entry->runtimeId == core::InvalidRuntimeId)
@@ -265,7 +278,40 @@ std::optional<BlockState> ContentCatalog::state(
     if (entry == nullptr || entry->runtimeId == core::InvalidRuntimeId)
         return std::nullopt;
 
-    std::uint8_t encoded = entry->value.stateSchema.defaultProperties;
+    if (!entry->value.stateSchema.states.empty())
+    {
+        auto desired = entry->value.stateSchema.states[
+            entry->value.stateSchema.defaultProperties
+        ];
+        for (const auto& [propertyName, textValue] : properties)
+        {
+            const auto found = std::find_if(
+                desired.begin(), desired.end(),
+                [&propertyName](const auto& property)
+                {
+                    return property.first == propertyName;
+                }
+            );
+            if (found == desired.end())
+                return std::nullopt;
+            found->second = textValue;
+        }
+        const auto found = std::find(
+            entry->value.stateSchema.states.begin(),
+            entry->value.stateSchema.states.end(),
+            desired
+        );
+        if (found == entry->value.stateSchema.states.end())
+            return std::nullopt;
+        return state(
+            name,
+            static_cast<std::uint16_t>(std::distance(
+                entry->value.stateSchema.states.begin(), found
+            ))
+        );
+    }
+
+    std::uint16_t encoded = entry->value.stateSchema.defaultProperties;
     for (const auto& [propertyName, textValue] : properties)
     {
         const auto found = std::find_if(
@@ -279,7 +325,7 @@ std::optional<BlockState> ContentCatalog::state(
         if (found == entry->value.stateSchema.properties.end())
             return std::nullopt;
 
-        std::uint8_t value = 0;
+        std::uint16_t value = 0;
         if (!found->valueNames.empty())
         {
             const auto valueName = std::find(
@@ -287,7 +333,7 @@ std::optional<BlockState> ContentCatalog::state(
             );
             if (valueName == found->valueNames.end())
                 return std::nullopt;
-            value = static_cast<std::uint8_t>(
+            value = static_cast<std::uint16_t>(
                 found->minimumValue +
                 std::distance(found->valueNames.begin(), valueName)
             );
@@ -300,16 +346,16 @@ std::optional<BlockState> ContentCatalog::state(
             );
             if (result.ec != std::errc{} ||
                 result.ptr != textValue.data() + textValue.size() ||
-                parsed > 255U)
+                parsed > 65535U)
             {
                 return std::nullopt;
             }
-            value = static_cast<std::uint8_t>(parsed);
+            value = static_cast<std::uint16_t>(parsed);
         }
         if (value < found->minimumValue || value > found->maximumValue)
             return std::nullopt;
-        encoded = static_cast<std::uint8_t>(
-            (encoded & static_cast<std::uint8_t>(~found->mask)) |
+        encoded = static_cast<std::uint16_t>(
+            (encoded & static_cast<std::uint16_t>(~found->mask)) |
             (value & found->mask)
         );
     }
@@ -323,11 +369,17 @@ ContentCatalog::serializeStateProperties(BlockState state) const
     const BlockDefinition* definition = block(state);
     if (definition == nullptr)
         return result;
+    if (!definition->stateSchema.states.empty())
+    {
+        if (state.properties() < definition->stateSchema.states.size())
+            return definition->stateSchema.states[state.properties()];
+        return result;
+    }
     result.reserve(definition->stateSchema.properties.size());
     for (const BlockPropertyDefinition& property :
          definition->stateSchema.properties)
     {
-        const std::uint8_t value = state.properties() & property.mask;
+        const std::uint16_t value = state.properties() & property.mask;
         std::string text;
         if (!property.valueNames.empty() &&
             value >= property.minimumValue && value <= property.maximumValue)

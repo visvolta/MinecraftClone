@@ -16,7 +16,7 @@ struct AtlasUV
     float maxV = 1.0f;
 };
 
-namespace mc::client { class RuntimeTextureAtlas; }
+namespace mc::client { class RuntimeTextureAtlas; struct BakedModel; }
 namespace mc::content { class ContentCatalog; }
 namespace mc::content::resources { class ResourcePack; }
 
@@ -51,5 +51,12 @@ public:
     [[nodiscard]] static std::optional<AtlasUV> getBlockOverlayUV(
         BlockType block,
         BlockFace face
+    ) noexcept;
+    [[nodiscard]] static const mc::client::BakedModel* getBakedBlockModel(
+        mc::content::BlockState state,
+        std::uint64_t positionSeed = 0
+    ) noexcept;
+    [[nodiscard]] static const AtlasUV* getTextureUV(
+        const mc::core::ResourceLocation& texture
     ) noexcept;
 };

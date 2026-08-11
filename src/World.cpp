@@ -2,8 +2,11 @@
 
 #include "AssetPaths.h"
 #include "TerrainGenerator.h"
+#include "content/BlockStateLogic.h"
+#include "content/ContentCatalog.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -29,6 +32,8 @@ World::World(int renderDistance, int seed)
       fluidSystem_(*this, static_cast<std::uint32_t>(seed)),
       farmingSystem_(static_cast<std::uint64_t>(static_cast<std::uint32_t>(seed))),
       seed_(seed),
+      structureLocator_(seed),
+      biomeLocator_(seed),
       renderDistance_(std::max(0, renderDistance)),
       unloadDistance_(std::max(0, renderDistance) + 1)
 {
@@ -349,17 +354,45 @@ mc::content::BlockState World::getBlockState(
     return chunkManager_.getBlockStateWorld(worldX, worldY, worldZ);
 }
 
+mc::content::BlockState World::getActualBlockState(
+    int worldX,
+    int worldY,
+    int worldZ) const
+{
+    return mc::content::resolveActualBlockState(
+        getBlockState(worldX, worldY, worldZ),
+        {{
+            getBlockState(worldX, worldY, worldZ - 1),
+            getBlockState(worldX + 1, worldY, worldZ),
+            getBlockState(worldX, worldY, worldZ + 1),
+            getBlockState(worldX - 1, worldY, worldZ)
+        }},
+        getBlockState(worldX, worldY + 1, worldZ)
+    );
+}
+
 std::uint8_t World::getBlockMetadata(
     int worldX,
     int worldY,
     int worldZ) const
 {
-    return getBlockState(worldX, worldY, worldZ).properties();
+    return static_cast<std::uint8_t>(
+        getBlockState(worldX, worldY, worldZ).properties()
+    );
 }
 
 bool World::isSolidBlock(int worldX, int worldY, int worldZ) const
 {
-    return isSolid(getBlock(worldX, worldY, worldZ));
+    const mc::content::BlockState state = getBlockState(
+        worldX, worldY, worldZ
+    );
+    if (const mc::content::ContentCatalog* catalog =
+            mc::content::ContentCatalog::active())
+    {
+        if (const mc::content::BlockDefinition* definition = catalog->block(state))
+            return definition->behaviour.traits.solid;
+    }
+    return isSolid(state.block());
 }
 
 bool World::isBlockLoaded(int worldX, int worldY, int worldZ) const
@@ -618,6 +651,112 @@ std::vector<ItemStack> World::copyBlockEntityContents(
 int World::getSeed() const noexcept
 {
     return seed_;
+}
+
+std::uint32_t World::getGenerationVersion() const noexcept
+{
+    return TerrainGenerator::CURRENT_GENERATION_VERSION;
+}
+
+std::optional<StructureLocation> World::findNearestStructure(
+    WorldStructure structure,
+    int worldX,
+    int worldZ,
+    int maximumRegionRadius) const
+{
+    return structureLocator_.findNearest(
+        structure, worldX, worldZ, maximumRegionRadius,
+        [this](int x, int z)
+        {
+            return biomeLocator_.sample(x, z);
+        });
+}
+
+void World::initializeGeneratedBlockEntities(const Chunk& chunk)
+{
+    const auto nextRandom = [](std::uint64_t& state)
+    {
+        state ^= state >> 12U;
+        state ^= state << 25U;
+        state ^= state >> 27U;
+        return state * 2685821657736338717ULL;
+    };
+    constexpr std::array<ItemType, 8> dungeonLoot{{
+        ItemType::Bread,
+        ItemType::Coal,
+        ItemType::IronIngot,
+        ItemType::GoldIngot,
+        ItemType::RedstoneDust,
+        ItemType::Seeds,
+        ItemType::Apple,
+        ItemType::Diamond
+    }};
+    for (int x = 0; x < Chunk::WIDTH; ++x)
+    {
+        for (int z = 0; z < Chunk::DEPTH; ++z)
+        {
+            for (int y = 0; y < Chunk::HEIGHT; ++y)
+            {
+                const BlockType generatedBlock = chunk.getBlock(x, y, z);
+                if (generatedBlock == BlockType::Spawner)
+                {
+                    const BlockPosition position{
+                        chunk.getWorldOriginX() + x,
+                        y,
+                        chunk.getWorldOriginZ() + z
+                    };
+                    if (blockEntities_.getSpawner(position) == nullptr)
+                    {
+                        std::uint64_t mobSeed =
+                            static_cast<std::uint64_t>(
+                                static_cast<std::uint32_t>(seed_)) ^
+                            (static_cast<std::uint64_t>(
+                                static_cast<std::uint32_t>(position.x)) << 32U) ^
+                            static_cast<std::uint32_t>(position.z);
+                        // Vanilla's dungeon choice is 50% skeleton, 25%
+                        // zombie, 25% spider. IDs are kept registry-neutral.
+                        const int roll = static_cast<int>(nextRandom(mobSeed) % 4U);
+                        blockEntities_.getOrCreateSpawner(position).setMobId(
+                            roll < 2 ? 1 : roll == 2 ? 0 : 2);
+                    }
+                    continue;
+                }
+                if (generatedBlock != BlockType::Chest)
+                    continue;
+                const BlockPosition position{
+                    chunk.getWorldOriginX() + x,
+                    y,
+                    chunk.getWorldOriginZ() + z
+                };
+                if (blockEntities_.getChest(position) != nullptr)
+                    continue;
+                ChestBlockEntity& chest =
+                    blockEntities_.getOrCreateChest(position);
+                std::uint64_t state =
+                    static_cast<std::uint64_t>(static_cast<std::uint32_t>(seed_));
+                state ^= static_cast<std::uint64_t>(
+                    static_cast<std::uint32_t>(position.x)) << 32U;
+                state ^= static_cast<std::uint32_t>(position.z);
+                state ^= static_cast<std::uint64_t>(position.y) *
+                    0x9E3779B97F4A7C15ULL;
+                const int rolls = 3 + static_cast<int>(nextRandom(state) % 5U);
+                for (int roll = 0; roll < rolls; ++roll)
+                {
+                    const std::size_t slot = static_cast<std::size_t>(
+                        nextRandom(state) % ChestBlockEntity::SLOT_COUNT);
+                    ItemType item = dungeonLoot[static_cast<std::size_t>(
+                        nextRandom(state) % dungeonLoot.size())];
+                    if (item == ItemType::Diamond &&
+                        nextRandom(state) % 8U != 0U)
+                        item = ItemType::IronIngot;
+                    const std::uint8_t count = static_cast<std::uint8_t>(
+                        item == ItemType::Diamond
+                            ? 1U : 1U + nextRandom(state) % 4U);
+                    chest.getSlot(slot) = {item, count};
+                }
+            }
+        }
+    }
 }
 
 std::vector<ChunkSnapshot> World::getModifiedChunkSnapshots() const
@@ -1317,7 +1456,13 @@ void World::integrateCompletedJobs(double budgetMilliseconds)
 
             if (desiredChunks_.contains(key))
             {
+                initializeGeneratedBlockEntities(*generatedChunk.chunk);
                 chunkManager_.insertChunk(std::move(generatedChunk.chunk));
+                // Persist every chunk the player has visited, not only edited
+                // chunks. This freezes its generated contents across future
+                // generator revisions while still allowing unexplored chunks
+                // to use the current generation version.
+                modifiedChunks_.insert(key);
                 initialMeshPending_.insert(key);
                 lighting_.queueChunkAndNeighbours(chunkX, chunkZ);
                 // The lighting completion queues the centre and all AO

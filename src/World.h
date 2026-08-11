@@ -8,6 +8,8 @@
 #include "FluidSystem.h"
 #include "LightingSystem.h"
 #include "worldgen/Biome.h"
+#include "worldgen/BiomeMap.h"
+#include "worldgen/StructureGenerator.h"
 #include "gameplay/FarmingSystem.h"
 #include "gameplay/RedstoneSystem.h"
 
@@ -21,6 +23,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -59,6 +62,11 @@ public:
     ) const;
 
     [[nodiscard]] mc::content::BlockState getBlockState(
+        int worldX,
+        int worldY,
+        int worldZ
+    ) const;
+    [[nodiscard]] mc::content::BlockState getActualBlockState(
         int worldX,
         int worldY,
         int worldZ
@@ -119,6 +127,12 @@ public:
     ) const;
 
     [[nodiscard]] int getSeed() const noexcept;
+    [[nodiscard]] std::uint32_t getGenerationVersion() const noexcept;
+    [[nodiscard]] std::optional<StructureLocation> findNearestStructure(
+        WorldStructure structure,
+        int worldX,
+        int worldZ,
+        int maximumRegionRadius = 100) const;
     [[nodiscard]] std::vector<ChunkSnapshot> getModifiedChunkSnapshots() const;
     [[nodiscard]] std::vector<BlockEntityRecord> getBlockEntitySnapshots() const;
     [[nodiscard]] std::vector<FluidScheduledTickSnapshot>
@@ -191,6 +205,8 @@ private:
     bool fastLeaves_ = false;
 
     int seed_ = 1337;
+    StructureGenerator structureLocator_;
+    BiomeMap biomeLocator_;
     int renderDistance_ = 3;
     int unloadDistance_ = 4;
 
@@ -234,6 +250,7 @@ private:
     double worldUpdateMilliseconds_ = 0.0;
 
     void refreshDesiredChunks(int centerChunkX, int centerChunkZ);
+    void initializeGeneratedBlockEntities(const Chunk& chunk);
     void queueChunkGeneration(int chunkX, int chunkZ);
     void queueChunkMesh(
         int chunkX,

@@ -47,6 +47,20 @@ private:
     std::array<ItemStack, SLOT_COUNT> slots_{};
 };
 
+class SpawnerBlockEntity final : public BlockEntity
+{
+public:
+    void setMobId(int mobId) noexcept;
+    [[nodiscard]] int mobId() const noexcept;
+    [[nodiscard]] const mc::core::ResourceLocation& typeId() const noexcept override;
+    [[nodiscard]] std::unique_ptr<BlockEntity> clone() const override;
+    [[nodiscard]] BlockEntityPersistentData savePersistentData() const override;
+    void loadPersistentData(const BlockEntityPersistentData& data) override;
+
+private:
+    int mobId_ = 0;
+};
+
 struct BlockEntityRecord
 {
     BlockPosition position;
@@ -103,11 +117,20 @@ public:
     [[nodiscard]] const ChestBlockEntity* getChest(
         const BlockPosition& position
     ) const noexcept;
+    [[nodiscard]] SpawnerBlockEntity* getSpawner(
+        const BlockPosition& position
+    ) noexcept;
+    [[nodiscard]] const SpawnerBlockEntity* getSpawner(
+        const BlockPosition& position
+    ) const noexcept;
 
     [[nodiscard]] FurnaceBlockEntity& getOrCreateFurnace(
         const BlockPosition& position
     );
     [[nodiscard]] ChestBlockEntity& getOrCreateChest(
+        const BlockPosition& position
+    );
+    [[nodiscard]] SpawnerBlockEntity& getOrCreateSpawner(
         const BlockPosition& position
     );
 

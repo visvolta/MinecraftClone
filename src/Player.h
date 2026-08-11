@@ -32,6 +32,7 @@ public:
     [[nodiscard]] glm::vec3 getEyePosition() const;
     [[nodiscard]] glm::vec3 getRenderPosition() const;
     [[nodiscard]] glm::vec3 getRenderEyePosition() const;
+    [[nodiscard]] const glm::vec3& getLookDirection() const noexcept;
     [[nodiscard]] bool isGrounded() const;
     [[nodiscard]] bool overlapsBlock(
         const glm::ivec3& blockPosition,

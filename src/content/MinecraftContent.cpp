@@ -1,7 +1,11 @@
 #include "content/MinecraftContent.h"
 
 #include "content/ContentCatalog.h"
+#include "content/resources/ResourcePack.h"
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -128,8 +132,11 @@ BlockBehaviour behaviourFor(BlockType type)
         isSolid(type)
     };
 
-    if (type == BlockType::Grass || type == BlockType::TallGrass)
+    if (type == BlockType::Grass || type == BlockType::TallGrass ||
+        type == BlockType::Fern)
         behaviour.tint = BlockTint::Grass;
+    else if (type == BlockType::Vine)
+        behaviour.tint = BlockTint::Foliage;
     else if (type == BlockType::OakLeaves ||
              type == BlockType::JungleLeaves ||
              type == BlockType::AcaciaLeaves ||
@@ -180,7 +187,32 @@ BlockBehaviour behaviourFor(BlockType type)
         case BlockType::OakLeaves: behaviour.dropRule = BlockDropRule::OakSapling; break;
         case BlockType::SpruceLeaves: behaviour.dropRule = BlockDropRule::SpruceSapling; break;
         case BlockType::BirchLeaves: behaviour.dropRule = BlockDropRule::BirchSapling; break;
+        case BlockType::JungleLeaves: behaviour.dropRule = BlockDropRule::JungleSapling; break;
+        case BlockType::AcaciaLeaves: behaviour.dropRule = BlockDropRule::AcaciaSapling; break;
+        case BlockType::DarkOakLeaves: behaviour.dropRule = BlockDropRule::DarkOakSapling; break;
         case BlockType::LitFurnace: behaviour.dropRule = BlockDropRule::Furnace; break;
+        case BlockType::Farmland: behaviour.dropRule = BlockDropRule::Farmland; break;
+        case BlockType::Glass:
+        case BlockType::Ice:
+        case BlockType::Vine:
+            behaviour.dropRule = BlockDropRule::GlassLike;
+            break;
+        case BlockType::Snow: behaviour.dropRule = BlockDropRule::Snowball; break;
+        case BlockType::Glowstone: behaviour.dropRule = BlockDropRule::GlowstoneDust; break;
+        case BlockType::RedstoneWire: behaviour.dropRule = BlockDropRule::RedstoneDust; break;
+        case BlockType::Wheat: behaviour.dropRule = BlockDropRule::WheatCrop; break;
+        case BlockType::Carrots: behaviour.dropRule = BlockDropRule::CarrotCrop; break;
+        case BlockType::Potatoes: behaviour.dropRule = BlockDropRule::PotatoCrop; break;
+        case BlockType::Beetroots: behaviour.dropRule = BlockDropRule::BeetrootCrop; break;
+        case BlockType::Melon: behaviour.dropRule = BlockDropRule::MelonSlices; break;
+        case BlockType::Cocoa: behaviour.dropRule = BlockDropRule::CocoaBeans; break;
+        case BlockType::Bookshelf: behaviour.dropRule = BlockDropRule::Books; break;
+        case BlockType::Cobweb: behaviour.dropRule = BlockDropRule::CobwebString; break;
+        case BlockType::DeadBush: behaviour.dropRule = BlockDropRule::DeadBushSticks; break;
+        case BlockType::BrownMushroomBlock:
+        case BlockType::RedMushroomBlock:
+            behaviour.dropRule = BlockDropRule::MushroomCap;
+            break;
         default: behaviour.dropRule = BlockDropRule::Self; break;
     }
     const auto lootName = [](BlockDropRule rule) -> std::string_view
@@ -201,7 +233,25 @@ BlockBehaviour behaviourFor(BlockType type)
             case BlockDropRule::OakSapling: return "oak_sapling";
             case BlockDropRule::SpruceSapling: return "spruce_sapling";
             case BlockDropRule::BirchSapling: return "birch_sapling";
+            case BlockDropRule::JungleSapling: return "jungle_sapling";
+            case BlockDropRule::AcaciaSapling: return "acacia_sapling";
+            case BlockDropRule::DarkOakSapling: return "dark_oak_sapling";
             case BlockDropRule::Furnace: return "furnace";
+            case BlockDropRule::Farmland: return "farmland";
+            case BlockDropRule::GlassLike: return "glass_like";
+            case BlockDropRule::Snowball: return "snowball";
+            case BlockDropRule::GlowstoneDust: return "glowstone_dust";
+            case BlockDropRule::RedstoneDust: return "redstone_dust";
+            case BlockDropRule::WheatCrop: return "wheat_crop";
+            case BlockDropRule::CarrotCrop: return "carrot_crop";
+            case BlockDropRule::PotatoCrop: return "potato_crop";
+            case BlockDropRule::BeetrootCrop: return "beetroot_crop";
+            case BlockDropRule::MelonSlices: return "melon_slices";
+            case BlockDropRule::CocoaBeans: return "cocoa_beans";
+            case BlockDropRule::Books: return "books";
+            case BlockDropRule::CobwebString: return "cobweb_string";
+            case BlockDropRule::DeadBushSticks: return "dead_bush_sticks";
+            case BlockDropRule::MushroomCap: return "mushroom_cap";
         }
         return "self";
     };
@@ -236,7 +286,7 @@ void addBlock(
             renderLayer
         }
     );
-    if (legacyType != BlockType::Air)
+    if (legacyType != BlockType::Air && !isCrop(legacyType))
     {
         catalog.registerItem(
             name,
@@ -266,6 +316,223 @@ void addItem(
         }
     );
 }
+
+std::string displayNameFor(std::string path)
+{
+    bool capitalize = true;
+    for (char& character : path)
+    {
+        if (character == '_' || character == '/')
+        {
+            character = ' ';
+            capitalize = true;
+        }
+        else if (capitalize)
+        {
+            character = static_cast<char>(std::toupper(
+                static_cast<unsigned char>(character)
+            ));
+            capitalize = false;
+        }
+    }
+    return path;
+}
+
+bool containsAny(std::string_view value, std::initializer_list<std::string_view> terms)
+{
+    return std::any_of(
+        terms.begin(), terms.end(),
+        [value](std::string_view term) { return value.find(term) != std::string_view::npos; }
+    );
+}
+
+bool endsWith(std::string_view value, std::string_view suffix)
+{
+    return value.size() >= suffix.size() &&
+           value.substr(value.size() - suffix.size()) == suffix;
+}
+
+bool equalsAny(std::string_view value, std::initializer_list<std::string_view> terms)
+{
+    return std::find(terms.begin(), terms.end(), value) != terms.end();
+}
+
+BlockBehaviour resourceBehaviour(std::string_view name)
+{
+    BlockBehaviour behaviour;
+    behaviour.breaking = getBlockProperties(BlockType::Stone);
+    behaviour.shape = &getBlockShape(BlockType::Stone);
+    behaviour.lootTable = id("self");
+    behaviour.dropRule = BlockDropRule::Self;
+    behaviour.traits.opaque = true;
+    behaviour.traits.solid = true;
+    behaviour.lightOpacity = 15;
+
+    // Keep these classifications token-aware. Substring matching "air" used
+    // to classify every *_stairs block as a plant, removing its collision and
+    // putting it in the cutout render pass.
+    const bool plant = equalsAny(name, {
+        "air", "tallgrass", "double_plant", "deadbush", "yellow_flower",
+        "red_flower", "brown_mushroom", "red_mushroom", "wheat",
+        "carrots", "potatoes", "beetroots", "reeds", "vine",
+        "waterlily", "nether_wart", "cocoa", "chorus_plant",
+        "chorus_flower"
+    }) || endsWith(name, "_sapling") || endsWith(name, "_stem");
+    const bool rail = name == "rail" || endsWith(name, "_rail");
+    const bool component = containsAny(name, {
+        "torch", "button", "lever", "pressure_plate", "tripwire"
+    }) || name == "redstone_wire" || equalsAny(name, {
+        "standing_sign", "wall_sign", "standing_banner", "wall_banner",
+        "structure_void"
+    });
+    const bool portal = equalsAny(name, {
+        "portal", "end_portal", "end_gateway", "fire"
+    });
+    const bool leaves = name == "leaves" || name == "leaves2" ||
+        endsWith(name, "_leaves");
+    const bool pane = name == "glass_pane" || name == "iron_bars" ||
+        endsWith(name, "_stained_glass_pane");
+    const bool fence = name == "fence" || endsWith(name, "_fence") ||
+        endsWith(name, "_fence_gate");
+    const bool doubleSlab = endsWith(name, "_double_slab");
+    const bool partialSolid = endsWith(name, "_stairs") ||
+        (endsWith(name, "_slab") && !doubleSlab) || endsWith(name, "_door") ||
+        endsWith(name, "_trapdoor") || endsWith(name, "_wall") ||
+        endsWith(name, "_carpet") || fence || pane ||
+        equalsAny(name, {
+            "stone_slab", "wooden_slab", "snow_layer", "bed", "cake",
+            "cauldron", "hopper", "anvil", "brewing_stand", "flower_pot",
+            "enchanting_table", "daylight_detector", "daylight_detector_inverted",
+            "trapped_chest", "ender_chest", "skull"
+        });
+
+    if (plant || rail || component || portal)
+    {
+        behaviour.shape = &getBlockShape(BlockType::TallGrass);
+        behaviour.traits = {};
+        behaviour.traits.plant = plant;
+        behaviour.traits.cutout = true;
+        behaviour.lightOpacity = 0;
+    }
+    else if (partialSolid)
+    {
+        behaviour.traits.opaque = false;
+        behaviour.traits.solid = true;
+        behaviour.lightOpacity = 0;
+        behaviour.traits.cutout = pane || endsWith(name, "_door") ||
+            endsWith(name, "_trapdoor");
+        if (endsWith(name, "_chest"))
+            behaviour.shape = &getBlockShape(BlockType::Chest);
+        else if (name == "skull" || name == "flower_pot")
+            behaviour.shape = &getBlockShape(BlockType::Lever);
+    }
+
+    if (containsAny(name, {"glass", "ice"}) || portal)
+    {
+        behaviour.shape = &getBlockShape(BlockType::Glass);
+        behaviour.traits.opaque = false;
+        behaviour.traits.translucent = true;
+        behaviour.traits.solid = !portal;
+        behaviour.traits.cutout = false;
+        behaviour.lightOpacity = name.find("ice") != std::string_view::npos ? 3 : 0;
+    }
+    if (leaves)
+    {
+        behaviour.shape = &getBlockShape(BlockType::OakLeaves);
+        behaviour.traits = {};
+        behaviour.traits.leaf = true;
+        behaviour.traits.cutout = true;
+        behaviour.lightOpacity = 1;
+        behaviour.tint = name.find("spruce") != std::string_view::npos
+            ? BlockTint::SpruceFoliage
+            : (name.find("birch") != std::string_view::npos
+                ? BlockTint::BirchFoliage : BlockTint::Foliage);
+    }
+    if (name == "grass" || name == "grass_block" ||
+        name.find("tallgrass") != std::string_view::npos)
+        behaviour.tint = BlockTint::Grass;
+
+    if (containsAny(name, {
+        "planks", "log", "wood", "fence", "door", "bookshelf",
+        "crafting_table", "chest"
+    }))
+        behaviour.breaking = getBlockProperties(BlockType::OakPlanks);
+    else if (leaves)
+        behaviour.breaking = getBlockProperties(BlockType::OakLeaves);
+    else if (plant || rail || component)
+        behaviour.breaking = getBlockProperties(BlockType::TallGrass);
+    else if (containsAny(name, {"glass", "pane"}))
+        behaviour.breaking = getBlockProperties(BlockType::Glass);
+    else if (containsAny(name, {"iron", "gold", "anvil"}))
+        behaviour.breaking = getBlockProperties(BlockType::IronBlock);
+    if (name.find("lava") != std::string_view::npos)
+        behaviour.lightEmission = 15;
+    if (containsAny(name, {"torch", "fire", "glowstone", "sea_lantern"}))
+        behaviour.lightEmission = name.find("redstone") != std::string_view::npos ? 7 : 15;
+    if (containsAny(name, {"bedrock", "barrier", "command_block", "structure_block"}))
+        behaviour.dropRule = BlockDropRule::None;
+    return behaviour;
+}
+
+void registerResourceContent(
+    ContentCatalog& catalog,
+    const std::filesystem::path& assetRoot)
+{
+    if (assetRoot.empty())
+        return;
+    const resources::ResourcePack pack(assetRoot);
+    for (const core::ResourceLocation& name : pack.lootTableNames())
+    {
+        if (catalog.lootTables().find(name) == nullptr)
+            catalog.registerLootTable(name, {BlockDropRule::None});
+    }
+    for (const core::ResourceLocation& name : pack.blockStateNames())
+    {
+        if (catalog.blocks().find(name) != nullptr)
+            continue;
+        BlockStateSchema schema;
+        schema.states = pack.blockStateCombinations(name);
+        const BlockBehaviour behaviour = resourceBehaviour(name.path());
+        const RenderLayer layer = behaviour.traits.translucent
+            ? RenderLayer::Translucent
+            : (behaviour.traits.leaf ? RenderLayer::CutoutMipped
+                : (behaviour.traits.cutout ? RenderLayer::Cutout
+                    : RenderLayer::Solid));
+        catalog.registerBlock(
+            name,
+            {
+                std::nullopt,
+                displayNameFor(name.path()),
+                {},
+                std::move(schema),
+                behaviour,
+                layer
+            }
+        );
+    }
+    for (const core::ResourceLocation& name : pack.itemModelNames())
+    {
+        if (catalog.items().find(name) != nullptr)
+            continue;
+        std::optional<core::ResourceLocation> placedBlock;
+        if (catalog.blocks().find(name) != nullptr)
+            placedBlock = name;
+        catalog.registerItem(
+            name,
+            {
+                std::nullopt,
+                displayNameFor(name.path()),
+                std::move(placedBlock),
+                ItemProperties{}
+            }
+        );
+    }
+}
+}
+
+MinecraftContentModule::MinecraftContentModule(std::filesystem::path assetRoot)
+    : assetRoot_(std::move(assetRoot))
+{
 }
 
 core::ResourceLocation MinecraftContentModule::id() const
@@ -275,10 +542,12 @@ core::ResourceLocation MinecraftContentModule::id() const
 
 void MinecraftContentModule::registerContent(ContentCatalog& catalog)
 {
-    registerMinecraftContent(catalog);
+    registerMinecraftContent(catalog, assetRoot_);
 }
 
-void registerMinecraftContent(ContentCatalog& catalog)
+void registerMinecraftContent(
+    ContentCatalog& catalog,
+    const std::filesystem::path& assetRoot)
 {
     const auto addLoot = [&catalog](
         std::string_view name,
@@ -300,7 +569,25 @@ void registerMinecraftContent(ContentCatalog& catalog)
     addLoot("oak_sapling", BlockDropRule::OakSapling);
     addLoot("spruce_sapling", BlockDropRule::SpruceSapling);
     addLoot("birch_sapling", BlockDropRule::BirchSapling);
+    addLoot("jungle_sapling", BlockDropRule::JungleSapling);
+    addLoot("acacia_sapling", BlockDropRule::AcaciaSapling);
+    addLoot("dark_oak_sapling", BlockDropRule::DarkOakSapling);
     addLoot("furnace", BlockDropRule::Furnace);
+    addLoot("farmland", BlockDropRule::Farmland);
+    addLoot("glass_like", BlockDropRule::GlassLike);
+    addLoot("snowball", BlockDropRule::Snowball);
+    addLoot("glowstone_dust", BlockDropRule::GlowstoneDust);
+    addLoot("redstone_dust", BlockDropRule::RedstoneDust);
+    addLoot("wheat_crop", BlockDropRule::WheatCrop);
+    addLoot("carrot_crop", BlockDropRule::CarrotCrop);
+    addLoot("potato_crop", BlockDropRule::PotatoCrop);
+    addLoot("beetroot_crop", BlockDropRule::BeetrootCrop);
+    addLoot("melon_slices", BlockDropRule::MelonSlices);
+    addLoot("cocoa_beans", BlockDropRule::CocoaBeans);
+    addLoot("books", BlockDropRule::Books);
+    addLoot("cobweb_string", BlockDropRule::CobwebString);
+    addLoot("dead_bush_sticks", BlockDropRule::DeadBushSticks);
+    addLoot("mushroom_cap", BlockDropRule::MushroomCap);
 
     addBlock(catalog, BlockType::Air, "air", "Air");
     addBlock(catalog, BlockType::Dirt, "dirt", "Dirt", cube("dirt"));
@@ -407,6 +694,17 @@ void registerMinecraftContent(ContentCatalog& catalog)
     addBlock(catalog, BlockType::Piston, "piston", "Piston", topSideBottom("piston_side", "piston_top_normal", "piston_bottom"));
     addBlock(catalog, BlockType::StickyPiston, "sticky_piston", "Sticky Piston", topSideBottom("piston_side", "piston_top_sticky", "piston_bottom"));
     addBlock(catalog, BlockType::TNT, "tnt", "TNT", topSideBottom("tnt_side", "tnt_top", "tnt_bottom"));
+    addBlock(catalog, BlockType::Fern, "fern", "Fern", cube("fern"));
+    addBlock(catalog, BlockType::DeadBush, "deadbush", "Dead Bush", cube("deadbush"));
+    addBlock(catalog, BlockType::Melon, "melon_block", "Melon", topSideBottom("melon_side", "melon_top", "melon_top"));
+    addBlock(catalog, BlockType::Vine, "vine", "Vines", cube("vine"));
+    addBlock(catalog, BlockType::Cocoa, "cocoa", "Cocoa", cube("cocoa_stage_2"));
+    addBlock(catalog, BlockType::BrownMushroomBlock, "brown_mushroom_block", "Brown Mushroom Block", cube("mushroom_block_skin_brown"));
+    addBlock(catalog, BlockType::RedMushroomBlock, "red_mushroom_block", "Red Mushroom Block", cube("mushroom_block_skin_red"));
+    addBlock(catalog, BlockType::MushroomStem, "mushroom_stem", "Mushroom Stem", cube("mushroom_block_skin_stem"));
+    addBlock(catalog, BlockType::StoneBricks, "stonebrick", "Stone Bricks", cube("stonebrick"));
+    addBlock(catalog, BlockType::Bookshelf, "bookshelf", "Bookshelf", cube("bookshelf"));
+    addBlock(catalog, BlockType::Cobweb, "web", "Cobweb", cube("web"));
 
     addItem(catalog, ItemType::Stick, "stick", "Stick");
     addItem(catalog, ItemType::Coal, "coal", "Coal");
@@ -453,9 +751,55 @@ void registerMinecraftContent(ContentCatalog& catalog)
     addItem(catalog, ItemType::DiamondChestplate, "diamond_chestplate", "Diamond Chestplate");
     addItem(catalog, ItemType::DiamondLeggings, "diamond_leggings", "Diamond Leggings");
     addItem(catalog, ItemType::DiamondBoots, "diamond_boots", "Diamond Boots");
+    addItem(catalog, ItemType::String, "string", "String");
+    addItem(catalog, ItemType::GlowstoneDust, "glowstone_dust", "Glowstone Dust");
+    addItem(catalog, ItemType::Snowball, "snowball", "Snowball");
+    addItem(catalog, ItemType::WheatItem, "wheat", "Wheat");
+    addItem(catalog, ItemType::BeetrootItem, "beetroot", "Beetroot");
+    addItem(catalog, ItemType::BeetrootSeeds, "beetroot_seeds", "Beetroot Seeds");
+    addItem(catalog, ItemType::MelonSlice, "melon", "Melon");
+    addItem(catalog, ItemType::CocoaBeans, "cocoa_beans", "Cocoa Beans");
+    addItem(catalog, ItemType::NetherBrickItem, "netherbrick", "Nether Brick");
+    addItem(catalog, ItemType::Book, "book", "Book");
+    addItem(catalog, ItemType::JungleSapling, "jungle_sapling", "Jungle Sapling");
+    addItem(catalog, ItemType::AcaciaSapling, "acacia_sapling", "Acacia Sapling");
+    addItem(catalog, ItemType::DarkOakSapling, "dark_oak_sapling", "Dark Oak Sapling");
+    addItem(catalog, ItemType::Arrow, "arrow", "Arrow");
+    addItem(catalog, ItemType::RawBeef, "beef", "Raw Beef");
+    addItem(catalog, ItemType::BlazeRod, "blaze_rod", "Blaze Rod");
+    addItem(catalog, ItemType::Bone, "bone", "Bone");
+    addItem(catalog, ItemType::RawChicken, "chicken", "Raw Chicken");
+    addItem(catalog, ItemType::Emerald, "emerald", "Emerald");
+    addItem(catalog, ItemType::EnderPearl, "ender_pearl", "Ender Pearl");
+    addItem(catalog, ItemType::Feather, "feather", "Feather");
+    addItem(catalog, ItemType::RawFish, "fish", "Raw Fish");
+    addItem(catalog, ItemType::GhastTear, "ghast_tear", "Ghast Tear");
+    addItem(catalog, ItemType::GlassBottle, "glass_bottle", "Glass Bottle");
+    addItem(catalog, ItemType::GoldNugget, "gold_nugget", "Gold Nugget");
+    addItem(catalog, ItemType::Gunpowder, "gunpowder", "Gunpowder");
+    addItem(catalog, ItemType::Leather, "leather", "Leather");
+    addItem(catalog, ItemType::MagmaCream, "magma_cream", "Magma Cream");
+    addItem(catalog, ItemType::RawMutton, "mutton", "Raw Mutton");
+    addItem(catalog, ItemType::NetherStar, "nether_star", "Nether Star");
+    addItem(catalog, ItemType::RawPorkchop, "porkchop", "Raw Porkchop");
+    addItem(catalog, ItemType::PrismarineCrystals, "prismarine_crystals", "Prismarine Crystals");
+    addItem(catalog, ItemType::PrismarineShard, "prismarine_shard", "Prismarine Shard");
+    addItem(catalog, ItemType::RawRabbit, "rabbit", "Raw Rabbit");
+    addItem(catalog, ItemType::RabbitFoot, "rabbit_foot", "Rabbit's Foot");
+    addItem(catalog, ItemType::RabbitHide, "rabbit_hide", "Rabbit Hide");
+    addItem(catalog, ItemType::RottenFlesh, "rotten_flesh", "Rotten Flesh");
+    addItem(catalog, ItemType::ShulkerShell, "shulker_shell", "Shulker Shell");
+    addItem(catalog, ItemType::SlimeBall, "slime_ball", "Slimeball");
+    addItem(catalog, ItemType::SpiderEye, "spider_eye", "Spider Eye");
+    addItem(catalog, ItemType::Sugar, "sugar", "Sugar");
+    addItem(catalog, ItemType::TippedArrow, "tipped_arrow", "Tipped Arrow");
+    addItem(catalog, ItemType::TotemOfUndying, "totem_of_undying", "Totem of Undying");
 
     catalog.registerEntityType(id("item"), {"Dropped Item"});
     catalog.registerBlockEntityType(id("furnace"), {"Furnace", 1});
     catalog.registerBlockEntityType(id("chest"), {"Chest", 1});
+    catalog.registerBlockEntityType(id("mob_spawner"), {"Mob Spawner", 1});
+
+    registerResourceContent(catalog, assetRoot);
 }
 }

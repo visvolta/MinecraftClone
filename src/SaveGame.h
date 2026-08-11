@@ -18,6 +18,7 @@ struct GameSaveData
 {
     int seed = 1337;
     std::uint64_t worldTime = 0;
+    std::uint32_t generationVersion = 2;
     std::optional<glm::ivec3> spawnPosition;
     PlayerPersistentState player;
     std::array<ItemStack, Inventory::SLOT_COUNT> inventory{};

@@ -42,6 +42,14 @@ enum class BiomeClimateCategory : std::uint8_t
     Ice
 };
 
+struct BiomeMobSpawn
+{
+    mc::core::ResourceLocation entity;
+    int weight = 1;
+    int minimumGroup = 1;
+    int maximumGroup = 1;
+};
+
 struct BiomeDefinition
 {
     BiomeId id = 0;
@@ -63,7 +71,22 @@ struct BiomeDefinition
     float extraTreeChance = 0.1f;
     int grassPerChunk = 1;
     int flowersPerChunk = 2;
+    int deadBushesPerChunk = 0;
+    int mushroomsPerChunk = 0;
+    int reedsPerChunk = 0;
+    int cactiPerChunk = 0;
+    int bigMushroomsPerChunk = 0;
+    int melonsPerChunk = 0;
+    int vinesPerChunk = 0;
+    int sandPatchesPerChunk = 3;
+    int clayPatchesPerChunk = 1;
+    int gravelPatchesPerChunk = 1;
+    bool generateFalls = true;
     bool roofedForestDecoration = false;
+    std::vector<BiomeMobSpawn> monsterSpawns;
+    std::vector<BiomeMobSpawn> creatureSpawns;
+    std::vector<BiomeMobSpawn> waterCreatureSpawns;
+    std::vector<BiomeMobSpawn> ambientSpawns;
     std::array<int, 4> generationWeights{};
     std::optional<BiomeId> mutationOf;
 };

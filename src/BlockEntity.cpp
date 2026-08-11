@@ -9,6 +9,7 @@ namespace
 {
 const mc::core::ResourceLocation FurnaceType("minecraft:furnace");
 const mc::core::ResourceLocation ChestType("minecraft:chest");
+const mc::core::ResourceLocation SpawnerType("minecraft:mob_spawner");
 }
 
 std::size_t BlockPositionHash::operator()(
@@ -86,6 +87,45 @@ std::span<const ItemStack> ChestBlockEntity::containerItems() const noexcept
     return slots_;
 }
 
+void SpawnerBlockEntity::setMobId(int mobId) noexcept
+{
+    mobId_ = std::clamp(mobId, 0, 2);
+}
+
+int SpawnerBlockEntity::mobId() const noexcept
+{
+    return mobId_;
+}
+
+const mc::core::ResourceLocation& SpawnerBlockEntity::typeId() const noexcept
+{
+    return SpawnerType;
+}
+
+std::unique_ptr<BlockEntity> SpawnerBlockEntity::clone() const
+{
+    return std::make_unique<SpawnerBlockEntity>(*this);
+}
+
+BlockEntityPersistentData SpawnerBlockEntity::savePersistentData() const
+{
+    BlockEntityPersistentData data;
+    data.integers.emplace_back("mob_id", mobId_);
+    return data;
+}
+
+void SpawnerBlockEntity::loadPersistentData(
+    const BlockEntityPersistentData& data)
+{
+    const auto mob = std::find_if(
+        data.integers.begin(), data.integers.end(),
+        [](const auto& entry)
+        {
+            return entry.first == "mob_id";
+        });
+    setMobId(mob == data.integers.end() ? 0 : mob->second);
+}
+
 void BlockEntityTypeRegistry::registerType(
     mc::core::ResourceLocation type,
     Factory factory)
@@ -131,6 +171,10 @@ BlockEntityTypeRegistry createMinecraftBlockEntityTypes()
     {
         return std::make_unique<ChestBlockEntity>();
     });
+    types.registerType(SpawnerType, []
+    {
+        return std::make_unique<SpawnerBlockEntity>();
+    });
     types.freeze();
     return types;
 }
@@ -151,6 +195,8 @@ void BlockEntityStore::onBlockChanged(
         return;
     if (oldBlock == BlockType::Chest && newBlock == BlockType::Chest)
         return;
+    if (oldBlock == BlockType::Spawner && newBlock == BlockType::Spawner)
+        return;
 
     entries_.erase(position);
     const mc::core::ResourceLocation* type = nullptr;
@@ -158,6 +204,8 @@ void BlockEntityStore::onBlockChanged(
         type = &FurnaceType;
     else if (newBlock == BlockType::Chest)
         type = &ChestType;
+    else if (newBlock == BlockType::Spawner)
+        type = &SpawnerType;
     if (type != nullptr)
         entries_.emplace(position, types_.create(*type));
 }
@@ -198,6 +246,24 @@ const ChestBlockEntity* BlockEntityStore::getChest(
         : dynamic_cast<const ChestBlockEntity*>(found->second.get());
 }
 
+SpawnerBlockEntity* BlockEntityStore::getSpawner(
+    const BlockPosition& position) noexcept
+{
+    const auto found = entries_.find(position);
+    return found == entries_.end()
+        ? nullptr
+        : dynamic_cast<SpawnerBlockEntity*>(found->second.get());
+}
+
+const SpawnerBlockEntity* BlockEntityStore::getSpawner(
+    const BlockPosition& position) const noexcept
+{
+    const auto found = entries_.find(position);
+    return found == entries_.end()
+        ? nullptr
+        : dynamic_cast<const SpawnerBlockEntity*>(found->second.get());
+}
+
 FurnaceBlockEntity& BlockEntityStore::getOrCreateFurnace(
     const BlockPosition& position)
 {
@@ -222,6 +288,19 @@ ChestBlockEntity& BlockEntityStore::getOrCreateChest(
         throw std::logic_error("Chest block entity factory returned wrong type");
     entries_.insert_or_assign(position, std::move(value));
     return *chest;
+}
+
+SpawnerBlockEntity& BlockEntityStore::getOrCreateSpawner(
+    const BlockPosition& position)
+{
+    if (SpawnerBlockEntity* existing = getSpawner(position))
+        return *existing;
+    auto value = types_.create(SpawnerType);
+    auto* spawner = dynamic_cast<SpawnerBlockEntity*>(value.get());
+    if (spawner == nullptr)
+        throw std::logic_error("Spawner block entity factory returned wrong type");
+    entries_.insert_or_assign(position, std::move(value));
+    return *spawner;
 }
 
 std::vector<ItemStack> BlockEntityStore::copyContainerContents(

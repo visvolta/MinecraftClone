@@ -41,9 +41,17 @@ BlockType WorldGenerationContext::getBlock(
     int worldY,
     int worldZ) const
 {
+    return getBlockState(worldX, worldY, worldZ).block();
+}
+
+mc::content::BlockState WorldGenerationContext::getBlockState(
+    int worldX,
+    int worldY,
+    int worldZ) const
+{
     if (worldY < 0 || worldY >= Chunk::HEIGHT)
     {
-        return BlockType::Air;
+        return {};
     }
 
     if (isolatedFeatureActive_)
@@ -58,13 +66,13 @@ BlockType WorldGenerationContext::getBlock(
         // the terrain snapshot here gives every replay exactly the same
         // validation input, including when a tree crosses a chunk boundary.
         return fallbackSampler_
-            ? fallbackSampler_(worldX, worldY, worldZ)
-            : BlockType::Air;
+            ? mc::content::BlockState(fallbackSampler_(worldX, worldY, worldZ))
+            : mc::content::BlockState{};
     }
 
     if (isInsideTarget(worldX, worldY, worldZ))
     {
-        return targetChunk_.getBlock(
+        return targetChunk_.getBlockState(
             worldX - targetChunk_.getWorldOriginX(),
             worldY,
             worldZ - targetChunk_.getWorldOriginZ()
@@ -72,8 +80,8 @@ BlockType WorldGenerationContext::getBlock(
     }
 
     return fallbackSampler_
-        ? fallbackSampler_(worldX, worldY, worldZ)
-        : BlockType::Air;
+        ? mc::content::BlockState(fallbackSampler_(worldX, worldY, worldZ))
+        : mc::content::BlockState{};
 }
 
 bool WorldGenerationContext::isInsideTarget(
@@ -95,12 +103,23 @@ bool WorldGenerationContext::setBlock(
     int worldZ,
     BlockType block)
 {
+    return setBlockState(
+        worldX, worldY, worldZ, mc::content::BlockState(block)
+    );
+}
+
+bool WorldGenerationContext::setBlockState(
+    int worldX,
+    int worldY,
+    int worldZ,
+    mc::content::BlockState state)
+{
     if (isolatedFeatureActive_)
     {
         if (worldY < 0 || worldY >= Chunk::HEIGHT)
             return false;
         stagedFeatureBlocks_.insert_or_assign(
-            FeaturePosition{worldX, worldY, worldZ}, block
+            FeaturePosition{worldX, worldY, worldZ}, state
         );
         return true;
     }
@@ -110,11 +129,11 @@ bool WorldGenerationContext::setBlock(
         return false;
     }
 
-    return targetChunk_.setBlock(
+    return targetChunk_.setBlockState(
         worldX - targetChunk_.getWorldOriginX(),
         worldY,
         worldZ - targetChunk_.getWorldOriginZ(),
-        block
+        state
     );
 }
 
@@ -128,15 +147,15 @@ void WorldGenerationContext::finishIsolatedFeature(bool commit)
 {
     if (commit)
     {
-        for (const auto& [position, block] : stagedFeatureBlocks_)
+        for (const auto& [position, state] : stagedFeatureBlocks_)
         {
             if (!isInsideTarget(position.x, position.y, position.z))
                 continue;
-            targetChunk_.setBlock(
+            targetChunk_.setBlockState(
                 position.x - targetChunk_.getWorldOriginX(),
                 position.y,
                 position.z - targetChunk_.getWorldOriginZ(),
-                block
+                state
             );
         }
     }

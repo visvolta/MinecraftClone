@@ -44,7 +44,7 @@ mc::content::BlockDropRule dropRuleFor(BlockType block) noexcept
 
 std::vector<ItemStack> getBlockDrops(
     BlockType block,
-    std::uint8_t,
+    std::uint8_t metadata,
     const ToolProperties& tool,
     std::mt19937& random)
 {
@@ -100,8 +100,97 @@ std::vector<ItemStack> getBlockDrops(
             return randomInclusive(random, 0, 19) == 0
                 ? std::vector<ItemStack>{ItemStack(ItemType::BirchSapling, 1)}
                 : std::vector<ItemStack>{};
+        case mc::content::BlockDropRule::JungleSapling:
+            return randomInclusive(random, 0, 39) == 0
+                ? std::vector<ItemStack>{ItemStack(ItemType::JungleSapling, 1)}
+                : std::vector<ItemStack>{};
+        case mc::content::BlockDropRule::AcaciaSapling:
+            return randomInclusive(random, 0, 19) == 0
+                ? std::vector<ItemStack>{ItemStack(ItemType::AcaciaSapling, 1)}
+                : std::vector<ItemStack>{};
+        case mc::content::BlockDropRule::DarkOakSapling:
+        {
+            std::vector<ItemStack> drops;
+            if (randomInclusive(random, 0, 19) == 0)
+                drops.emplace_back(ItemType::DarkOakSapling, 1);
+            if (randomInclusive(random, 0, 199) == 0)
+                drops.emplace_back(ItemType::Apple, 1);
+            return drops;
+        }
         case mc::content::BlockDropRule::Furnace:
             return {ItemStack(BlockType::Furnace)};
+        case mc::content::BlockDropRule::Farmland:
+            return {ItemStack(BlockType::Dirt)};
+        case mc::content::BlockDropRule::GlassLike:
+            return {};
+        case mc::content::BlockDropRule::Snowball:
+            return {ItemStack(ItemType::Snowball, 1)};
+        case mc::content::BlockDropRule::GlowstoneDust:
+            return individualDrops(
+                ItemType::GlowstoneDust,
+                randomInclusive(random, 2, 4)
+            );
+        case mc::content::BlockDropRule::RedstoneDust:
+            return {ItemStack(ItemType::RedstoneDust, 1)};
+        case mc::content::BlockDropRule::WheatCrop:
+        {
+            if (metadata < 7U)
+                return {ItemStack(ItemType::Seeds, 1)};
+            std::vector<ItemStack> drops{ItemStack(ItemType::WheatItem, 1)};
+            const int seeds = randomInclusive(random, 0, 3);
+            for (int index = 0; index < seeds; ++index)
+                drops.emplace_back(ItemType::Seeds, 1);
+            return drops;
+        }
+        case mc::content::BlockDropRule::CarrotCrop:
+            return individualDrops(
+                ItemType::Carrot,
+                metadata >= 7U ? randomInclusive(random, 1, 4) : 1
+            );
+        case mc::content::BlockDropRule::PotatoCrop:
+            return individualDrops(
+                ItemType::Potato,
+                metadata >= 7U ? randomInclusive(random, 1, 4) : 1
+            );
+        case mc::content::BlockDropRule::BeetrootCrop:
+        {
+            if (metadata < 3U)
+                return {ItemStack(ItemType::BeetrootSeeds, 1)};
+            std::vector<ItemStack> drops{ItemStack(ItemType::BeetrootItem, 1)};
+            const int seeds = randomInclusive(random, 0, 3);
+            for (int index = 0; index < seeds; ++index)
+                drops.emplace_back(ItemType::BeetrootSeeds, 1);
+            return drops;
+        }
+        case mc::content::BlockDropRule::MelonSlices:
+            return individualDrops(
+                ItemType::MelonSlice,
+                randomInclusive(random, 3, 7)
+            );
+        case mc::content::BlockDropRule::CocoaBeans:
+            return individualDrops(
+                ItemType::CocoaBeans,
+                metadata >= 2U ? 3 : 1
+            );
+        case mc::content::BlockDropRule::Books:
+            return individualDrops(ItemType::Book, 3);
+        case mc::content::BlockDropRule::CobwebString:
+            return {ItemStack(ItemType::String, 1)};
+        case mc::content::BlockDropRule::DeadBushSticks:
+            return individualDrops(
+                ItemType::Stick,
+                randomInclusive(random, 0, 2)
+            );
+        case mc::content::BlockDropRule::MushroomCap:
+        {
+            const ItemType mushroom = block == BlockType::BrownMushroomBlock
+                ? itemFromBlock(BlockType::BrownMushroom)
+                : itemFromBlock(BlockType::RedMushroom);
+            return individualDrops(
+                mushroom,
+                randomInclusive(random, 0, 2)
+            );
+        }
         case mc::content::BlockDropRule::Self:
             return {ItemStack(block)};
     }

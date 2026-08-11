@@ -25,6 +25,30 @@ BiomeDefinition biome(
     result.heightVariation = variation;
     result.temperature = temperature;
     result.rainfall = rainfall;
+    // Biome.java installs these four lists for every ordinary biome. Derived
+    // biomes below replace or extend them exactly where 1.12.2 does.
+    result.monsterSpawns = {
+        {mc::core::ResourceLocation("minecraft:spider"), 100, 4, 4},
+        {mc::core::ResourceLocation("minecraft:zombie"), 95, 4, 4},
+        {mc::core::ResourceLocation("minecraft:zombie_villager"), 5, 1, 1},
+        {mc::core::ResourceLocation("minecraft:skeleton"), 100, 4, 4},
+        {mc::core::ResourceLocation("minecraft:creeper"), 100, 4, 4},
+        {mc::core::ResourceLocation("minecraft:slime"), 100, 4, 4},
+        {mc::core::ResourceLocation("minecraft:enderman"), 10, 1, 4},
+        {mc::core::ResourceLocation("minecraft:witch"), 5, 1, 1}
+    };
+    result.creatureSpawns = {
+        {mc::core::ResourceLocation("minecraft:sheep"), 12, 4, 4},
+        {mc::core::ResourceLocation("minecraft:pig"), 10, 4, 4},
+        {mc::core::ResourceLocation("minecraft:chicken"), 10, 4, 4},
+        {mc::core::ResourceLocation("minecraft:cow"), 8, 4, 4}
+    };
+    result.waterCreatureSpawns = {
+        {mc::core::ResourceLocation("minecraft:squid"), 10, 4, 4}
+    };
+    result.ambientSpawns = {
+        {mc::core::ResourceLocation("minecraft:bat"), 10, 8, 8}
+    };
     return result;
 }
 
@@ -268,8 +292,284 @@ BiomeRegistry makeVanillaRegistry()
         }
     }
 
+    const auto configure = [&result](BiomeId id, auto action)
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+            action(*definition);
+    };
+    for (const BiomeId id : {
+             VanillaBiomes::Desert,
+             VanillaBiomes::DesertHills,
+             VanillaBiomes::DesertMountains})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.deadBushesPerChunk = 2;
+            definition.reedsPerChunk = 50;
+            definition.cactiPerChunk = 10;
+        });
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Mesa,
+             VanillaBiomes::MesaPlateauF,
+             VanillaBiomes::MesaPlateau,
+             VanillaBiomes::MesaBryce,
+             VanillaBiomes::MesaPlateauFMountains,
+             VanillaBiomes::MesaPlateauMountains})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.deadBushesPerChunk = 20;
+            definition.reedsPerChunk = 3;
+            definition.cactiPerChunk = 5;
+        });
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Swampland,
+             VanillaBiomes::SwamplandMountains})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.deadBushesPerChunk = 1;
+            definition.mushroomsPerChunk = 8;
+        });
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Taiga,
+             VanillaBiomes::TaigaHills,
+             VanillaBiomes::TaigaMountains,
+             VanillaBiomes::ColdTaiga,
+             VanillaBiomes::ColdTaigaHills,
+             VanillaBiomes::ColdTaigaMountains})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.mushroomsPerChunk = 1;
+        });
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::MegaTaiga,
+             VanillaBiomes::MegaTaigaHills,
+             VanillaBiomes::MegaSpruceTaiga,
+             VanillaBiomes::MegaSpruceTaigaHills})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.deadBushesPerChunk = 1;
+            definition.mushroomsPerChunk = 3;
+        });
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Jungle,
+             VanillaBiomes::JungleHills,
+             VanillaBiomes::JungleMountains})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.melonsPerChunk = 1;
+            definition.vinesPerChunk = 50;
+        });
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::MushroomIsland,
+             VanillaBiomes::MushroomShore})
+    {
+        configure(id, [](BiomeDefinition& definition)
+        {
+            definition.bigMushroomsPerChunk = 1;
+            definition.mushroomsPerChunk = 1;
+        });
+    }
+
     value = biome(127, "void", "The Void", 0.1f, 0.2f, 0.5f, 0.5f);
     value.rain = false; value.treeFeature = TreeFeature::None; add(std::move(value));
+
+    const auto addCreature = [&result](BiomeId id, BiomeMobSpawn spawn)
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+            definition->creatureSpawns.push_back(std::move(spawn));
+    };
+    const auto clearCreatures = [&result](BiomeId id)
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+            definition->creatureSpawns.clear();
+    };
+    for (const BiomeId id : {
+             VanillaBiomes::Ocean, VanillaBiomes::DeepOcean,
+             VanillaBiomes::FrozenOcean, VanillaBiomes::River,
+             VanillaBiomes::FrozenRiver, VanillaBiomes::Beach,
+             VanillaBiomes::ColdBeach, VanillaBiomes::StoneBeach,
+             VanillaBiomes::Mesa, VanillaBiomes::MesaPlateauF,
+             VanillaBiomes::MesaPlateau, VanillaBiomes::MesaBryce,
+             VanillaBiomes::MesaPlateauFMountains,
+             VanillaBiomes::MesaPlateauMountains})
+        clearCreatures(id);
+    for (const BiomeId id : {
+             VanillaBiomes::Plains, VanillaBiomes::SunflowerPlains})
+    {
+        addCreature(id, {mc::core::ResourceLocation("minecraft:horse"), 5, 2, 6});
+        addCreature(id, {mc::core::ResourceLocation("minecraft:donkey"), 1, 1, 3});
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Savanna, VanillaBiomes::SavannaPlateau,
+             VanillaBiomes::SavannaMountains,
+             VanillaBiomes::SavannaPlateauMountains})
+    {
+        addCreature(id, {mc::core::ResourceLocation("minecraft:horse"), 1, 2, 6});
+        addCreature(id, {mc::core::ResourceLocation("minecraft:donkey"), 1, 1, 1});
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Forest, VanillaBiomes::ForestHills})
+        addCreature(id, {mc::core::ResourceLocation("minecraft:wolf"), 5, 4, 4});
+    addCreature(
+        VanillaBiomes::FlowerForest,
+        {mc::core::ResourceLocation("minecraft:rabbit"), 4, 2, 3}
+    );
+    for (const BiomeId id : {
+             VanillaBiomes::Taiga, VanillaBiomes::TaigaHills,
+             VanillaBiomes::TaigaMountains, VanillaBiomes::ColdTaiga,
+             VanillaBiomes::ColdTaigaHills,
+             VanillaBiomes::ColdTaigaMountains,
+             VanillaBiomes::MegaTaiga, VanillaBiomes::MegaTaigaHills,
+             VanillaBiomes::MegaSpruceTaiga,
+             VanillaBiomes::MegaSpruceTaigaHills})
+    {
+        addCreature(id, {mc::core::ResourceLocation("minecraft:wolf"), 8, 4, 4});
+        addCreature(id, {mc::core::ResourceLocation("minecraft:rabbit"), 4, 2, 3});
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Jungle, VanillaBiomes::JungleHills,
+             VanillaBiomes::JungleMountains})
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+            definition->monsterSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:ocelot"), 2, 1, 1
+            });
+        addCreature(id, {mc::core::ResourceLocation("minecraft:parrot"), 40, 1, 2});
+        addCreature(id, {mc::core::ResourceLocation("minecraft:chicken"), 10, 4, 4});
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::JungleEdge,
+             VanillaBiomes::JungleEdgeMountains})
+    {
+        addCreature(id, {mc::core::ResourceLocation("minecraft:parrot"), 40, 1, 2});
+        addCreature(id, {mc::core::ResourceLocation("minecraft:chicken"), 10, 4, 4});
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::IcePlains, VanillaBiomes::IceMountains,
+             VanillaBiomes::IcePlainsSpikes})
+    {
+        addCreature(id, {mc::core::ResourceLocation("minecraft:rabbit"), 10, 2, 3});
+        addCreature(id, {mc::core::ResourceLocation("minecraft:polar_bear"), 1, 1, 2});
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::MushroomIsland, VanillaBiomes::MushroomShore})
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+        {
+            definition->monsterSpawns.clear();
+            definition->waterCreatureSpawns.clear();
+            definition->creatureSpawns = {{
+                mc::core::ResourceLocation("minecraft:mushroom_cow"), 8, 4, 8
+            }};
+        }
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::Desert, VanillaBiomes::DesertHills,
+             VanillaBiomes::DesertMountains})
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+        {
+            definition->creatureSpawns.clear();
+            definition->creatureSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:rabbit"), 4, 2, 3
+            });
+            std::erase_if(
+                definition->monsterSpawns,
+                [](const BiomeMobSpawn& spawn)
+                {
+                    return spawn.entity ==
+                               mc::core::ResourceLocation("minecraft:zombie") ||
+                           spawn.entity == mc::core::ResourceLocation(
+                               "minecraft:zombie_villager"
+                           );
+                }
+            );
+            definition->monsterSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:zombie"), 19, 4, 4
+            });
+            definition->monsterSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:zombie_villager"), 1, 1, 1
+            });
+            definition->monsterSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:husk"), 80, 4, 4
+            });
+        }
+    }
+    for (const BiomeId id : {
+             VanillaBiomes::IcePlains, VanillaBiomes::IceMountains,
+             VanillaBiomes::IcePlainsSpikes})
+    {
+        if (BiomeDefinition* definition = result.findMutable(id))
+        {
+            std::erase_if(
+                definition->monsterSpawns,
+                [](const BiomeMobSpawn& spawn)
+                {
+                    return spawn.entity ==
+                        mc::core::ResourceLocation("minecraft:skeleton");
+                }
+            );
+            definition->monsterSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:skeleton"), 20, 4, 4
+            });
+            definition->monsterSpawns.push_back({
+                mc::core::ResourceLocation("minecraft:stray"), 80, 4, 4
+            });
+        }
+    }
+    if (BiomeDefinition* swamp = result.findMutable(VanillaBiomes::Swampland))
+        swamp->monsterSpawns.push_back({
+            mc::core::ResourceLocation("minecraft:slime"), 1, 1, 1
+        });
+    for (const BiomeId id : {
+             VanillaBiomes::ExtremeHills, VanillaBiomes::ExtremeHillsEdge,
+             VanillaBiomes::ExtremeHillsPlus,
+             VanillaBiomes::ExtremeHillsMountains,
+             VanillaBiomes::ExtremeHillsPlusMountains})
+        addCreature(id, {mc::core::ResourceLocation("minecraft:llama"), 5, 4, 6});
+    for (const BiomeId id : {
+             VanillaBiomes::SavannaMountains,
+             VanillaBiomes::SavannaPlateauMountains})
+        addCreature(id, {mc::core::ResourceLocation("minecraft:llama"), 8, 4, 4});
+    if (BiomeDefinition* nether = result.findMutable(VanillaBiomes::Hell))
+    {
+        nether->creatureSpawns.clear();
+        nether->waterCreatureSpawns.clear();
+        nether->ambientSpawns.clear();
+        nether->monsterSpawns = {
+            {mc::core::ResourceLocation("minecraft:ghast"), 50, 4, 4},
+            {mc::core::ResourceLocation("minecraft:zombie_pigman"), 100, 4, 4},
+            {mc::core::ResourceLocation("minecraft:magma_cube"), 2, 4, 4},
+            {mc::core::ResourceLocation("minecraft:enderman"), 1, 4, 4}
+        };
+    }
+    if (BiomeDefinition* end = result.findMutable(VanillaBiomes::Sky))
+    {
+        end->creatureSpawns.clear();
+        end->waterCreatureSpawns.clear();
+        end->ambientSpawns.clear();
+        end->monsterSpawns = {{
+            mc::core::ResourceLocation("minecraft:enderman"), 10, 4, 4
+        }};
+    }
+    if (BiomeDefinition* empty = result.findMutable(VanillaBiomes::Void))
+    {
+        empty->monsterSpawns.clear();
+        empty->creatureSpawns.clear();
+        empty->waterCreatureSpawns.clear();
+        empty->ambientSpawns.clear();
+    }
 
     result.freeze();
     return result;

@@ -8,10 +8,12 @@
 
 namespace mc::game
 {
-GameBootstrap::GameBootstrap()
+GameBootstrap::GameBootstrap(std::filesystem::path assetRoot)
 {
     gameplay::registerVanillaGameplay(gameplay_);
-    addContentModule(std::make_unique<content::MinecraftContentModule>());
+    addContentModule(std::make_unique<content::MinecraftContentModule>(
+        std::move(assetRoot)
+    ));
 }
 
 void GameBootstrap::addContentModule(
@@ -39,6 +41,19 @@ void GameBootstrap::loadContentModules()
 
     for (const auto& module : modules_)
         module->registerContent(content_);
+
+    // Entity types are content, not renderer-owned special cases. Mirror the
+    // gameplay definitions into the canonical entity-type registry before it
+    // freezes so save data and mods can resolve the same names used by spawn,
+    // AI, loot and rendering systems.
+    for (const auto& entry : gameplay_.mobs().entries())
+    {
+        if (content_.entityTypes().find(entry.name) == nullptr)
+            content_.registerEntityType(
+                entry.name,
+                {entry.value.displayName}
+            );
+    }
     modulesLoaded_ = true;
 }
 

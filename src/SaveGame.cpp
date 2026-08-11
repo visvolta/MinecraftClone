@@ -18,7 +18,8 @@ constexpr std::uint32_t LEGACY_VERSION = 1;
 constexpr std::uint32_t NAMESPACED_BLOCK_VERSION = 2;
 constexpr std::uint32_t REGISTRY_ENTITY_VERSION = 3;
 constexpr std::uint32_t SURVIVAL_HEIGHT_VERSION = 4;
-constexpr std::uint32_t VERSION = 5;
+constexpr std::uint32_t SPAWN_VERSION = 5;
+constexpr std::uint32_t VERSION = 6;
 constexpr int LEGACY_HEIGHT = 128;
 constexpr std::size_t LEGACY_BLOCK_COUNT =
     static_cast<std::size_t>(Chunk::WIDTH * LEGACY_HEIGHT * Chunk::DEPTH);
@@ -115,9 +116,9 @@ private:
 
 bool validItemValue(std::uint16_t value)
 {
-    return (value > 0 && value <= static_cast<std::uint16_t>(BlockType::TNT)) ||
+    return (value > 0 && value <= static_cast<std::uint16_t>(BlockType::Cobweb)) ||
            (value >= static_cast<std::uint16_t>(ItemType::Stick) &&
-            value <= static_cast<std::uint16_t>(ItemType::DiamondBoots));
+            value <= static_cast<std::uint16_t>(ItemType::TotemOfUndying));
 }
 
 void writeStack(Writer& writer, const ItemStack& stack)
@@ -342,6 +343,7 @@ void writeData(
     writer.value(VERSION);
     writer.value(data.seed);
     writer.value(data.worldTime);
+    writer.value(data.generationVersion);
     const glm::ivec3 spawn = data.spawnPosition.value_or(glm::ivec3(0, 64, 0));
     writer.value(spawn.x);
     writer.value(spawn.y);
@@ -415,13 +417,17 @@ GameSaveData readData(
         version != NAMESPACED_BLOCK_VERSION &&
         version != REGISTRY_ENTITY_VERSION &&
         version != SURVIVAL_HEIGHT_VERSION &&
+        version != SPAWN_VERSION &&
         version != VERSION)
         throw std::runtime_error("Unsupported world save version");
 
     GameSaveData data;
     data.seed = reader.value<int>();
     data.worldTime = reader.value<std::uint64_t>();
-    if (version >= VERSION)
+    data.generationVersion = version >= VERSION
+        ? reader.value<std::uint32_t>()
+        : 1U;
+    if (version >= SPAWN_VERSION)
     {
         const int spawnX = reader.value<int>();
         const int spawnY = reader.value<int>();

@@ -5,6 +5,7 @@
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -88,6 +89,21 @@ struct ResolvedModel
     bool ambientOcclusion = true;
 };
 
+struct LootContext
+{
+    bool killedByPlayer = true;
+    bool onFire = false;
+    int lootingLevel = 0;
+    float luck = 0.0f;
+};
+
+struct LootStackResource
+{
+    core::ResourceLocation item{"minecraft:air"};
+    int count = 0;
+    int metadata = 0;
+};
+
 class ResourcePack
 {
 public:
@@ -110,9 +126,35 @@ public:
         std::string textureReference,
         const ResolvedModel& model
     ) const;
+    [[nodiscard]] std::vector<core::ResourceLocation> blockStateNames() const;
+    [[nodiscard]] std::vector<core::ResourceLocation> itemModelNames() const;
+    [[nodiscard]] std::vector<
+        std::vector<std::pair<std::string, std::string>>
+    > blockStateCombinations(const core::ResourceLocation& name) const;
+    [[nodiscard]] std::vector<core::ResourceLocation> lootTableNames() const;
+    [[nodiscard]] std::vector<LootStackResource> rollLootTable(
+        const core::ResourceLocation& name,
+        const LootContext& context,
+        std::mt19937& random
+    ) const;
 
 private:
     std::filesystem::path assetRoot_;
+    mutable std::unordered_map<
+        core::ResourceLocation,
+        BlockStateResource,
+        core::ResourceLocationHash
+    > blockStateCache_;
+    mutable std::unordered_map<
+        core::ResourceLocation,
+        ModelResource,
+        core::ResourceLocationHash
+    > modelCache_;
+    mutable std::unordered_map<
+        core::ResourceLocation,
+        ResolvedModel,
+        core::ResourceLocationHash
+    > resolvedModelCache_;
 
     [[nodiscard]] ResolvedModel resolveModel(
         const core::ResourceLocation& name,
@@ -120,6 +162,16 @@ private:
             core::ResourceLocation,
             core::ResourceLocationHash
         >& resolving
+    ) const;
+    [[nodiscard]] std::vector<core::ResourceLocation> discoverJsonResources(
+        const std::filesystem::path& relativeDirectory
+    ) const;
+    void rollLootTable(
+        const core::ResourceLocation& name,
+        const LootContext& context,
+        std::mt19937& random,
+        std::vector<LootStackResource>& output,
+        int recursionDepth
     ) const;
 };
 }

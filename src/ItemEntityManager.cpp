@@ -105,6 +105,25 @@ void ItemEntityManager::spawnPlayerDrop(
     );
 }
 
+void ItemEntityManager::spawnMobDrop(
+    ItemStack stack,
+    const glm::vec3& position)
+{
+    if (stack.empty())
+        return;
+    entities_.emplace_back(
+        position + glm::vec3(0.0f, 0.25f, 0.0f),
+        stack,
+        glm::vec3(
+            randomFloat(-0.1f, 0.1f),
+            0.2f,
+            randomFloat(-0.1f, 0.1f)
+        ),
+        randomFloat(0.0f, std::numbers::pi_v<float> * 2.0f),
+        10
+    );
+}
+
 void ItemEntityManager::spawnContainerDrops(
     std::span<const ItemStack> contents,
     const glm::ivec3& blockPosition)

@@ -59,6 +59,50 @@ std::string_view itemTexture(ItemType item)
         case ItemType::DiamondChestplate: return "items/diamond_chestplate";
         case ItemType::DiamondLeggings: return "items/diamond_leggings";
         case ItemType::DiamondBoots: return "items/diamond_boots";
+        case ItemType::String: return "items/string";
+        case ItemType::GlowstoneDust: return "items/glowstone_dust";
+        case ItemType::Snowball: return "items/snowball";
+        case ItemType::WheatItem: return "items/wheat";
+        case ItemType::BeetrootItem: return "items/beetroot";
+        case ItemType::BeetrootSeeds: return "items/beetroot_seeds";
+        case ItemType::MelonSlice: return "items/melon";
+        case ItemType::CocoaBeans: return "items/dye_powder_brown";
+        case ItemType::NetherBrickItem: return "items/netherbrick";
+        case ItemType::Book: return "items/book_normal";
+        case ItemType::JungleSapling: return "blocks/sapling_jungle";
+        case ItemType::AcaciaSapling: return "blocks/sapling_acacia";
+        case ItemType::DarkOakSapling: return "blocks/sapling_roofed_oak";
+        case ItemType::Arrow: return "items/arrow";
+        case ItemType::RawBeef: return "items/beef_raw";
+        case ItemType::BlazeRod: return "items/blaze_rod";
+        case ItemType::Bone: return "items/bone";
+        case ItemType::RawChicken: return "items/chicken_raw";
+        case ItemType::Dye: return "items/dye_powder_black";
+        case ItemType::Emerald: return "items/emerald";
+        case ItemType::EnderPearl: return "items/ender_pearl";
+        case ItemType::Feather: return "items/feather";
+        case ItemType::RawFish: return "items/fish_cod_raw";
+        case ItemType::GhastTear: return "items/ghast_tear";
+        case ItemType::GlassBottle: return "items/potion_bottle_empty";
+        case ItemType::GoldNugget: return "items/gold_nugget";
+        case ItemType::Gunpowder: return "items/gunpowder";
+        case ItemType::Leather: return "items/leather";
+        case ItemType::MagmaCream: return "items/magma_cream";
+        case ItemType::RawMutton: return "items/mutton_raw";
+        case ItemType::NetherStar: return "items/nether_star";
+        case ItemType::RawPorkchop: return "items/porkchop_raw";
+        case ItemType::PrismarineCrystals: return "items/prismarine_crystals";
+        case ItemType::PrismarineShard: return "items/prismarine_shard";
+        case ItemType::RawRabbit: return "items/rabbit_raw";
+        case ItemType::RabbitFoot: return "items/rabbit_foot";
+        case ItemType::RabbitHide: return "items/rabbit_hide";
+        case ItemType::RottenFlesh: return "items/rotten_flesh";
+        case ItemType::ShulkerShell: return "items/shulker_shell";
+        case ItemType::SlimeBall: return "items/slimeball";
+        case ItemType::SpiderEye: return "items/spider_eye";
+        case ItemType::Sugar: return "items/sugar";
+        case ItemType::TippedArrow: return "items/tipped_arrow_base";
+        case ItemType::TotemOfUndying: return "items/totem";
         case ItemType::Empty: break;
     }
     return {};
@@ -83,7 +127,7 @@ ItemAtlas::ItemAtlas(const std::filesystem::path& textureRoot)
 {
     std::vector<ItemType> items;
     const auto first = static_cast<std::uint16_t>(ItemType::Stick);
-    const auto last = static_cast<std::uint16_t>(ItemType::DiamondBoots);
+    const auto last = static_cast<std::uint16_t>(ItemType::TotemOfUndying);
     for (std::uint16_t value = first; value <= last; ++value)
     {
         const ItemType item = static_cast<ItemType>(value);

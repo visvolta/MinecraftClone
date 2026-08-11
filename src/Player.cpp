@@ -62,6 +62,11 @@ const glm::vec3& Player::getPosition() const
     return position_;
 }
 
+const glm::vec3& Player::getLookDirection() const noexcept
+{
+    return lookDirection_;
+}
+
 glm::vec3 Player::getEyePosition() const
 {
     return position_ + glm::vec3(0.0f, currentEyeHeight(), 0.0f);
@@ -911,9 +916,10 @@ bool Player::collidesAtHeight(
         {
             for (int x = blockMinX; x <= blockMaxX; ++x)
             {
-                const BlockType block = world.getBlock(x, y, z);
+                const mc::content::BlockState state =
+                    world.getActualBlockState(x, y, z);
                 for (const BlockBox& localBox :
-                     getBlockShape(block).collisionBoxes)
+                     getBlockShape(state).collisionBoxes)
                 {
                     if (boxesIntersect(
                             playerBox,

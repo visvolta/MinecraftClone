@@ -12,7 +12,7 @@ int main()
     const BlockState furnace(BlockType::Furnace, 5);
     assert(furnace.block() == BlockType::Furnace);
     assert(furnace.properties() == 5);
-    assert(BlockState(BlockType::Water, 31).properties() == 15);
+    assert(BlockState(BlockType::Water, 31).properties() == 31);
 
     Chunk chunk(2, -3);
     assert(chunk.getBlockState(1, 64, 1).isAir());

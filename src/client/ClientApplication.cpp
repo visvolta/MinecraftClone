@@ -1,9 +1,11 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <random>
 #include <stdexcept>
 
 #include <glad/gl.h>
@@ -41,9 +43,11 @@
 #include "World.h"
 #include "TextureAtlas.h"
 #include "client/render/RuntimeTextureAtlas.h"
+#include "client/render/MobEntityRenderer.h"
 #include "client/ClientApplication.h"
 #include "content/resources/ResourcePack.h"
 #include "engine/FixedStepClock.h"
+#include "entity/MobEntityManager.h"
 #include "game/GameBootstrap.h"
 #include "worldgen/BiomeMap.h"
 #include "worldgen/SurfaceBuilder.h"
@@ -129,6 +133,17 @@ namespace
             case BlockType::TallGrass: return "Tall Grass";
             case BlockType::Rose: return "Rose";
             case BlockType::Dandelion: return "Dandelion";
+            case BlockType::Fern: return "Fern";
+            case BlockType::DeadBush: return "Dead Bush";
+            case BlockType::Melon: return "Melon";
+            case BlockType::Vine: return "Vines";
+            case BlockType::Cocoa: return "Cocoa";
+            case BlockType::BrownMushroomBlock: return "Brown Mushroom Block";
+            case BlockType::RedMushroomBlock: return "Red Mushroom Block";
+            case BlockType::MushroomStem: return "Mushroom Stem";
+            case BlockType::StoneBricks: return "Stone Bricks";
+            case BlockType::Bookshelf: return "Bookshelf";
+            case BlockType::Cobweb: return "Cobweb";
             case BlockType::MossyCobblestone: return "Mossy Cobblestone";
             case BlockType::Spawner: return "Spawner";
             case BlockType::Chest: return "Chest";
@@ -170,6 +185,47 @@ namespace
         }
     }
 
+    std::optional<ItemStack> legacyLootStack(
+        const mc::content::resources::LootStackResource& drop,
+        const mc::content::ContentCatalog& content)
+    {
+        if (drop.count <= 0)
+            return std::nullopt;
+        ItemType item = ItemType::Empty;
+        if (const std::optional<ItemType> registered =
+                content.legacyItem(drop.item))
+        {
+            item = *registered;
+        }
+        else if (drop.item == mc::core::ResourceLocation("minecraft:wool"))
+        {
+            constexpr std::array<BlockType, 16> wool{{
+                BlockType::WhiteWool, BlockType::OrangeWool,
+                BlockType::MagentaWool, BlockType::LightBlueWool,
+                BlockType::YellowWool, BlockType::LimeWool,
+                BlockType::PinkWool, BlockType::GrayWool,
+                BlockType::LightGrayWool, BlockType::CyanWool,
+                BlockType::PurpleWool, BlockType::BlueWool,
+                BlockType::BrownWool, BlockType::GreenWool,
+                BlockType::RedWool, BlockType::BlackWool
+            }};
+            const int colour = std::clamp(drop.metadata, 0, 15);
+            item = itemFromBlock(wool[static_cast<std::size_t>(colour)]);
+        }
+        else if (drop.item ==
+                 mc::core::ResourceLocation("minecraft:red_flower"))
+        {
+            item = itemFromBlock(BlockType::Rose);
+        }
+        if (item == ItemType::Empty)
+            return std::nullopt;
+        return ItemStack(
+            item,
+            static_cast<std::uint8_t>(std::clamp(drop.count, 1, 64)),
+            static_cast<std::uint16_t>(std::max(0, drop.metadata))
+        );
+    }
+
     GameSaveData captureSaveData(
         const World& world,
         const Player& player,
@@ -180,6 +236,7 @@ namespace
         GameSaveData data;
         data.seed = world.getSeed();
         data.worldTime = atmosphere.getWorldTime();
+        data.generationVersion = world.getGenerationVersion();
         data.spawnPosition = glm::ivec3(
             static_cast<int>(std::floor(spawnFeetPosition.x)),
             static_cast<int>(std::floor(spawnFeetPosition.y)),
@@ -369,7 +426,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
     {
         Shader blockShader(AssetPaths::get("shaders/block.vert"), AssetPaths::get("shaders/block.frag"));
         Shader outlineShader(AssetPaths::get("shaders/outline.vert"), AssetPaths::get("shaders/outline.frag"));
-        mc::game::GameBootstrap gameBootstrap;
+        mc::game::GameBootstrap gameBootstrap(AssetPaths::root());
         gameBootstrap.loadContentModules();
         gameBootstrap.freezeRegistries();
         FurnaceRecipeRegistry::initialize(
@@ -414,6 +471,9 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         PlayerHUD playerHUD;
         DeathScreen deathScreen;
         ItemEntityManager itemEntities;
+        mc::entity::MobEntityManager mobEntities(gameBootstrap.gameplay());
+        mc::client::MobEntityRenderer mobEntityRenderer;
+        std::mt19937 mobLootRandom(1122U);
         SkyRenderer skyRenderer;
         Atmosphere atmosphere;
         PostProcessor postProcessor;
@@ -533,6 +593,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         const glm::mat4 model(1.0f);
         constexpr float blockReach = 5.0f;
         bool rightMouseWasPressed = false;
+        bool leftMouseWasPressed = false;
         bool escapeWasPressed = false;
         bool inventoryWasPressed = false;
         bool dropWasPressed = false;
@@ -578,6 +639,27 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     player,
                     inventory
                 );
+                mobEntities.tick(
+                    *world, player, atmosphere.getWorldTime()
+                );
+                for (const mc::entity::MobDeath& death :
+                     mobEntities.takeDeaths())
+                {
+                    for (const auto& drop : resourcePack.rollLootTable(
+                             death.lootTable,
+                             {
+                                 .killedByPlayer = death.killedByPlayer,
+                                 .onFire = false,
+                                 .lootingLevel = 0,
+                                 .luck = 0.0f
+                             },
+                             mobLootRandom))
+                    {
+                        if (const auto stack = legacyLootStack(
+                                drop, gameBootstrap.content()))
+                            itemEntities.spawnMobDrop(*stack, death.position);
+                    }
+                }
                 atmosphere.tick(*world, player.getEyePosition());
 
                 if (gameTick % 600 == 0)
@@ -767,6 +849,23 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 allowWorldMouseInput &&
                 glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
+            const float attackStrength = player.survival().attackStrength();
+            const float baseAttackDamage = std::max(
+                1.0f,
+                1.0f + inventory.getSelectedToolProperties().miningSpeed * 0.25f
+            );
+            const bool attackedEntity = leftMousePressed &&
+                !leftMouseWasPressed &&
+                mobEntities.attackNearest(
+                    camera.getPosition(),
+                    camera.getForward(),
+                    targetedBlock.hit ? targetedBlock.distance : blockReach,
+                    baseAttackDamage *
+                        (0.2f + attackStrength * attackStrength * 0.8f)
+                );
+            if (attackedEntity)
+                player.resetAttackCooldown();
+
             const ItemProperties& mainHandProperties =
                 getItemProperties(inventory.getSelectedItem());
             const bool offhandShield = getItemProperties(
@@ -792,7 +891,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             player.setBlocking(rightMousePressed && usingShield);
 
             blockBreakingController.update(
-                leftMousePressed,
+                leftMousePressed && !attackedEntity,
                 targetedBlock,
                 deltaTime,
                 inventory.getSlot(inventory.getSelectedHotbarSlot()),
@@ -976,6 +1075,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             }
 
             rightMouseWasPressed = rightMousePressed;
+            leftMouseWasPressed = leftMousePressed;
 
             // Refresh the selection immediately after an edit.
             targetedBlock = Raycast::cast(
@@ -1104,14 +1204,28 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 itemAtlas,
                 atmosphereState
             );
+            mobEntityRenderer.draw(
+                mobEntities.entities(),
+                partialGameTick,
+                view,
+                projection,
+                atmosphereState
+            );
 
             // Interaction overlays are drawn before fluids. Water blends over
             // them and opaque lava subsequently depth-occludes them, so a
             // selected solid can no longer show through a liquid surface.
             if (blockBreakingController.isBreaking())
             {
+                const glm::ivec3 breakingPosition =
+                    blockBreakingController.getBlockPosition();
                 blockDamageOverlay.draw(
-                    blockBreakingController.getBlockPosition(),
+                    breakingPosition,
+                    world->getActualBlockState(
+                        breakingPosition.x,
+                        breakingPosition.y,
+                        breakingPosition.z
+                    ),
                     blockBreakingController.getDestroyStage(),
                     view,
                     projection
@@ -1120,7 +1234,8 @@ int mc::client::ClientApplication::run(int argc, char** argv)
 
             if (targetedBlock.hit)
             {
-                const BlockType targetedType = world->getBlock(
+                const mc::content::BlockState targetedState =
+                    world->getActualBlockState(
                     targetedBlock.blockPosition.x,
                     targetedBlock.blockPosition.y,
                     targetedBlock.blockPosition.z
@@ -1131,21 +1246,15 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 outlineShader.setMat4("projection", projection);
                 glLineWidth(1.0f);
                 glDepthMask(GL_FALSE);
-                for (const BlockBox& box :
-                     getBlockShape(targetedType).selectionBoxes)
-                {
-                    const glm::vec3 scale = box.maximum - box.minimum;
-                    const glm::vec3 centre =
-                        (box.minimum + box.maximum) * 0.5f;
-                    glm::mat4 outlineModel(1.0f);
-                    outlineModel = glm::translate(
-                        outlineModel,
-                        glm::vec3(targetedBlock.blockPosition) + centre
-                    );
-                    outlineModel = glm::scale(outlineModel, scale);
-                    outlineShader.setMat4("model", outlineModel);
-                    blockOutline.draw();
-                }
+                glm::mat4 outlineModel(1.0f);
+                outlineModel = glm::translate(
+                    outlineModel,
+                    glm::vec3(targetedBlock.blockPosition)
+                );
+                outlineShader.setMat4("model", outlineModel);
+                blockOutline.draw(
+                    targetedState, targetedBlock.blockPosition
+                );
                 glDepthMask(GL_TRUE);
             }
 
@@ -1236,6 +1345,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     }
                     camera.resetMouseTracking();
                     rightMouseWasPressed = false;
+                    leftMouseWasPressed = false;
                     dropWasPressed = false;
                     blockBreakingController.reset();
                 }
@@ -1287,6 +1397,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 player.respawn(spawnFeetPosition);
                 inventory = Inventory{};
                 itemEntities.clear();
+                mobEntities.clear();
                 atmosphere.setWorldTime(0);
                 camera.setPosition(player.getEyePosition());
                 camera.resetMouseTracking();
@@ -1295,6 +1406,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 gameClock = mc::engine::FixedStepClock(20.0, 5);
                 previousFrameTime = glfwGetTime();
                 rightMouseWasPressed = false;
+                leftMouseWasPressed = false;
                 escapeWasPressed = false;
                 inventoryWasPressed = false;
                 dropWasPressed = false;

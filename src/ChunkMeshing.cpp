@@ -1,6 +1,8 @@
 #include "ChunkMeshing.h"
 
 #include "BlockShape.h"
+#include "content/BlockStateLogic.h"
+#include "content/ContentCatalog.h"
 
 #include <algorithm>
 
@@ -19,6 +21,25 @@ mc::content::BlockState sampleState(
         return {};
     }
     return input.snapshot->getBlockState(x, y, z);
+}
+
+mc::content::BlockState actualState(
+    const ChunkMeshInput& input,
+    int x,
+    int y,
+    int z,
+    mc::content::BlockState state)
+{
+    return mc::content::resolveActualBlockState(
+        state,
+        {{
+            sampleState(input, x, y, z - 1),
+            sampleState(input, x + 1, y, z),
+            sampleState(input, x, y, z + 1),
+            sampleState(input, x - 1, y, z)
+        }},
+        sampleState(input, x, y + 1, z)
+    );
 }
 
 BlockType sampleBlock(
@@ -78,6 +99,49 @@ bool shouldRenderFace(
     if (isCutout(block)) return !isOpaque(neighbour);
     if (isTranslucent(block)) return isAir(neighbour) || isCutout(neighbour);
     return false;
+}
+
+bool occludesNeighbourFace(mc::content::BlockState state) noexcept
+{
+    if (state.isAir())
+        return false;
+    if (const mc::content::ContentCatalog* catalog =
+            mc::content::ContentCatalog::active())
+    {
+        if (const mc::content::BlockDefinition* definition = catalog->block(state))
+        {
+            static_cast<void>(definition);
+            return getBlockShape(state).occludesNeighbourFaces;
+        }
+    }
+    return getBlockShape(state).occludesNeighbourFaces;
+}
+
+bool shouldRenderFace(
+    mc::content::BlockState block,
+    mc::content::BlockState neighbour) noexcept
+{
+    if (neighbour.isAir())
+        return true;
+    const mc::content::ContentCatalog* catalog =
+        mc::content::ContentCatalog::active();
+    const mc::content::BlockDefinition* blockDefinition =
+        catalog == nullptr ? nullptr : catalog->block(block);
+    const mc::content::BlockDefinition* neighbourDefinition =
+        catalog == nullptr ? nullptr : catalog->block(neighbour);
+    if (blockDefinition == nullptr || neighbourDefinition == nullptr)
+        return shouldRenderFace(block.block(), neighbour.block());
+    if (block.blockRuntimeId() == neighbour.blockRuntimeId() &&
+        blockDefinition->behaviour.traits.translucent)
+        return false;
+    if (blockDefinition->behaviour.traits.opaque)
+        return !occludesNeighbourFace(neighbour);
+    if (blockDefinition->behaviour.traits.cutout ||
+        blockDefinition->behaviour.traits.leaf)
+        return !neighbourDefinition->behaviour.traits.opaque;
+    if (blockDefinition->behaviour.traits.translucent)
+        return neighbour.isAir() || neighbourDefinition->behaviour.traits.cutout;
+    return !occludesNeighbourFace(neighbour);
 }
 
 bool shouldRenderFastLeafFace(

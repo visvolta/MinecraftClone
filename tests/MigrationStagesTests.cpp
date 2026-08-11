@@ -1,5 +1,8 @@
 #include "Chunk.h"
+#include "BlockShape.h"
 #include "client/render/ModelBakery.h"
+#include "client/render/MobModel.h"
+#include "content/BlockStateLogic.h"
 #include "content/resources/ResourcePack.h"
 #include "game/GameBootstrap.h"
 #include "gameplay/SurvivalStats.h"
@@ -9,9 +12,11 @@
 #include "worldgen/JavaRandom.h"
 
 #include <cassert>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <vector>
+#include <string>
 
 int main()
 {
@@ -59,6 +64,57 @@ int main()
     assert(vanilla.find(VanillaBiomes::ColdTaiga)->generationWeights[3] == 1);
     assert(vanilla.find(VanillaBiomes::IcePlains)->generationWeights[3] == 3);
     assert(vanilla.find(VanillaBiomes::MesaBryce)->mutationOf == VanillaBiomes::Mesa);
+    const auto hasSpawn = [](const std::vector<BiomeMobSpawn>& spawns,
+                             const char* entity, int weight)
+    {
+        for (const BiomeMobSpawn& spawn : spawns)
+            if (spawn.entity == mc::core::ResourceLocation(entity) &&
+                spawn.weight == weight)
+                return true;
+        return false;
+    };
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::Plains)->creatureSpawns,
+        "minecraft:horse", 5
+    ));
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::Desert)->monsterSpawns,
+        "minecraft:husk", 80
+    ));
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::Jungle)->creatureSpawns,
+        "minecraft:parrot", 40
+    ));
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::Jungle)->monsterSpawns,
+        "minecraft:ocelot", 2
+    ));
+    assert(!hasSpawn(
+        vanilla.find(VanillaBiomes::Jungle)->creatureSpawns,
+        "minecraft:ocelot", 2
+    ));
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::Desert)->monsterSpawns,
+        "minecraft:zombie_villager", 1
+    ));
+    assert(!hasSpawn(
+        vanilla.find(VanillaBiomes::Desert)->monsterSpawns,
+        "minecraft:zombie_villager", 5
+    ));
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::IcePlains)->monsterSpawns,
+        "minecraft:skeleton", 20
+    ));
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::IcePlains)->monsterSpawns,
+        "minecraft:stray", 80
+    ));
+    assert(vanilla.find(VanillaBiomes::Ocean)->creatureSpawns.empty());
+    assert(hasSpawn(
+        vanilla.find(VanillaBiomes::Swampland)->monsterSpawns,
+        "minecraft:slime", 1
+    ));
+    assert(vanilla.find(VanillaBiomes::Void)->monsterSpawns.empty());
 
     const BiomeMap biomeMap(123456789);
     const auto firstSamples = biomeMap.sampleArea(-32, 48, 16, 16);
@@ -117,17 +173,220 @@ int main()
         survival.tick(false, false, health, 20);
     assert(survival.attackStrength() == 1.0f);
 
-    mc::game::GameBootstrap bootstrap;
+    mc::game::GameBootstrap bootstrap(std::filesystem::path("assets"));
     bootstrap.loadContentModules();
     bootstrap.freezeRegistries();
     const mc::content::resources::ResourcePack resources(
         std::filesystem::path("assets")
     );
     const mc::client::ModelBakery bakery(resources, bootstrap.content());
+    std::size_t resourceStateCount = 0;
+    for (const auto& entry : bootstrap.content().blocks().entries())
+    {
+        if (entry.value.legacyType)
+            continue;
+        for (std::size_t properties = 0;
+             properties < entry.value.stateSchema.stateCount(); ++properties)
+        {
+            const auto state = mc::content::BlockState::fromRuntimeId(
+                entry.runtimeId, static_cast<std::uint16_t>(properties)
+            );
+            assert(bootstrap.content().isValidState(state));
+            static_cast<void>(bakery.bake(state, 0U));
+            ++resourceStateCount;
+        }
+    }
+    assert(resourceStateCount > 2000U);
+
+    for (std::uint8_t rawModel = 0;
+         rawModel < static_cast<std::uint8_t>(
+             mc::gameplay::MobModelKind::Count
+         ); ++rawModel)
+    {
+        const auto kind = static_cast<mc::gameplay::MobModelKind>(rawModel);
+        mc::client::MobModelDefinition mobModel =
+            mc::client::createMobModel(kind);
+        assert(!mobModel.parts.empty());
+        std::size_t cubeCount = 0;
+        for (std::size_t partIndex=0; partIndex<mobModel.parts.size();
+             ++partIndex)
+        {
+            const mc::client::MobModelPart& part=mobModel.parts[partIndex];
+            assert(part.parent<static_cast<int>(partIndex));
+            cubeCount += part.cubes.size();
+            for(const mc::client::MobModelCube& cube:part.cubes)
+            {
+                assert(cube.size.x>0 && cube.size.y>0 && cube.size.z>0);
+                assert(cube.textureOffset.x>=0 && cube.textureOffset.y>=0);
+                assert(cube.textureOffset.x+cube.size.z*2+
+                       cube.size.x*2<=mobModel.textureWidth);
+                assert(cube.textureOffset.y+cube.size.z+
+                       cube.size.y<=mobModel.textureHeight*2);
+            }
+        }
+        assert(cubeCount > 0);
+        mc::client::animateMobModel(
+            kind, mobModel,
+            {20.0f, 4.0f, 0.8f, 0.2f, -0.1f,
+             0.5f, 0.6f, 0.0f, 0.0f, false, false, true}
+        );
+    }
     const mc::client::BakedModel stone = bakery.bake(
         bootstrap.content().defaultState(BlockType::Stone), 1234U
     );
     assert(stone.quads.size() == 6U);
     for (const mc::client::BakedQuad& quad : stone.quads)
         assert(quad.texture.toString() == "minecraft:blocks/stone");
+
+    const mc::content::BlockState netherrackState =
+        bootstrap.content().defaultState(BlockType::Netherrack);
+    const mc::client::BakedModel netherrackZero = bakery.bake(
+        netherrackState, 0U
+    );
+    const mc::client::BakedModel netherrackOne = bakery.bake(
+        netherrackState, 1U
+    );
+    assert(netherrackZero.quads.size() == netherrackOne.quads.size());
+    bool weightedVariantDiffers = false;
+    for (std::size_t quadIndex = 0;
+         quadIndex < netherrackZero.quads.size(); ++quadIndex)
+    {
+        const mc::client::BakedQuad& first = netherrackZero.quads[quadIndex];
+        const mc::client::BakedQuad& second = netherrackOne.quads[quadIndex];
+        if (first.face != second.face)
+            weightedVariantDiffers = true;
+        for (std::size_t vertexIndex = 0; vertexIndex < first.positions.size();
+             ++vertexIndex)
+        {
+            const glm::vec3 positionDelta =
+                first.positions[vertexIndex] - second.positions[vertexIndex];
+            const glm::vec2 uvDelta = first.textureCoordinates[vertexIndex] -
+                                      second.textureCoordinates[vertexIndex];
+            if (positionDelta.x * positionDelta.x +
+                    positionDelta.y * positionDelta.y +
+                    positionDelta.z * positionDelta.z > 0.00000001F ||
+                uvDelta.x * uvDelta.x + uvDelta.y * uvDelta.y > 0.00000001F)
+                weightedVariantDiffers = true;
+        }
+    }
+    assert(weightedVariantDiffers);
+
+    const auto fenceState = bootstrap.content().state(
+        mc::core::ResourceLocation("minecraft:fence"),
+        std::array<std::pair<std::string, std::string>, 2>{
+            std::pair{"north", "true"}, std::pair{"east", "true"}
+        }
+    );
+    assert(fenceState);
+    const mc::client::BakedModel fence = bakery.bake(*fenceState, 99U);
+    assert(fence.quads.size() > 6U);
+    assert(!fence.elementBoxes.empty());
+    registerModelBlockShape(
+        *fenceState,
+        fence.elementBoxes,
+        ModelBlockShapeKind::Fence,
+        false
+    );
+    for (const BlockBox& box : getBlockShape(*fenceState).collisionBoxes)
+        assert(box.maximum.y == 1.5f);
+
+    const auto stairState = bootstrap.content().state(
+        mc::core::ResourceLocation("minecraft:oak_stairs"),
+        std::array<std::pair<std::string, std::string>, 3>{
+            std::pair{"facing", "east"},
+            std::pair{"half", "bottom"},
+            std::pair{"shape", "straight"}
+        }
+    );
+    assert(stairState);
+    const mc::content::BlockDefinition* stairDefinition =
+        bootstrap.content().block(*stairState);
+    assert(stairDefinition);
+    assert(stairDefinition->behaviour.traits.solid);
+    assert(!stairDefinition->behaviour.traits.plant);
+    assert(!stairDefinition->behaviour.traits.opaque);
+    const mc::client::BakedModel stair = bakery.bake(*stairState, 0U);
+    assert(stair.elementBoxes.size() == 2U);
+    registerModelBlockShape(
+        *stairState,
+        stair.elementBoxes,
+        ModelBlockShapeKind::Solid,
+        false
+    );
+    assert(getBlockShape(*stairState).collisionBoxes.size() == 2U);
+    const auto northStairState = bootstrap.content().state(
+        mc::core::ResourceLocation("minecraft:oak_stairs"),
+        std::array<std::pair<std::string, std::string>, 3>{
+            std::pair{"facing", "north"},
+            std::pair{"half", "bottom"},
+            std::pair{"shape", "straight"}
+        }
+    );
+    assert(northStairState);
+    const mc::content::BlockState cornerStair =
+        mc::content::resolveActualBlockState(
+            *stairState,
+            {{{}, *northStairState, {}, {}}},
+            {}
+        );
+    bool outerLeft = false;
+    for (const auto& [name, value] :
+         bootstrap.content().serializeStateProperties(cornerStair))
+        if (name == "shape")
+            outerLeft = value == "outer_left";
+    assert(outerLeft);
+
+    const auto disconnectedFence = bootstrap.content().state(
+        mc::core::ResourceLocation("minecraft:fence"),
+        std::array<std::pair<std::string, std::string>, 4>{
+            std::pair{"north", "false"}, std::pair{"east", "false"},
+            std::pair{"south", "false"}, std::pair{"west", "false"}
+        }
+    );
+    assert(disconnectedFence);
+    const mc::content::BlockState connectedFence =
+        mc::content::resolveActualBlockState(
+            *disconnectedFence,
+            {{bootstrap.content().defaultState(BlockType::Stone), {}, {}, {}}},
+            {}
+        );
+    bool northConnected = false;
+    for (const auto& [name, value] :
+         bootstrap.content().serializeStateProperties(connectedFence))
+    {
+        if (name == "north")
+            northConnected = value == "true";
+    }
+    assert(northConnected);
+
+    const mc::content::BlockState fenceAgainstGlass =
+        mc::content::resolveActualBlockState(
+            *disconnectedFence,
+            {{bootstrap.content().defaultState(BlockType::Glass), {}, {}, {}}},
+            {}
+        );
+    for (const auto& [name, value] :
+         bootstrap.content().serializeStateProperties(fenceAgainstGlass))
+        if (name == "north")
+            assert(value == "false");
+
+    const auto disconnectedPane = bootstrap.content().state(
+        mc::core::ResourceLocation("minecraft:glass_pane"),
+        std::array<std::pair<std::string, std::string>, 4>{
+            std::pair{"north", "false"}, std::pair{"east", "false"},
+            std::pair{"south", "false"}, std::pair{"west", "false"}
+        }
+    );
+    assert(disconnectedPane);
+    const mc::content::BlockState paneAgainstGlass =
+        mc::content::resolveActualBlockState(
+            *disconnectedPane,
+            {{bootstrap.content().defaultState(BlockType::Glass), {}, {}, {}}},
+            {}
+        );
+    for (const auto& [name, value] :
+         bootstrap.content().serializeStateProperties(paneAgainstGlass))
+        if (name == "north")
+            assert(value == "true");
+    clearModelBlockShapes();
 }

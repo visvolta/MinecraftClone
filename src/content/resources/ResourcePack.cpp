@@ -1,7 +1,10 @@
 #include "content/resources/ResourcePack.h"
 
 #include <fstream>
+#include <algorithm>
 #include <cmath>
+#include <map>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 
@@ -89,9 +92,14 @@ StatePredicate parsePredicate(const Json& json)
     StatePredicate result;
     for (auto entry = json.begin(); entry != json.end(); ++entry)
     {
-        if (!entry.value().is_string())
-            throw std::runtime_error("Multipart property must be a string");
-        result.properties.emplace(entry.key(), entry.value().get<std::string>());
+        if (entry.value().is_string())
+            result.properties.emplace(entry.key(), entry.value().get<std::string>());
+        else if (entry.value().is_boolean())
+            result.properties.emplace(
+                entry.key(), entry.value().get<bool>() ? "true" : "false"
+            );
+        else
+            throw std::runtime_error("Multipart property must be scalar");
     }
     return result;
 }
@@ -192,6 +200,9 @@ ResourcePack::ResourcePack(std::filesystem::path assetRoot)
 BlockStateResource ResourcePack::loadBlockState(
     const core::ResourceLocation& name) const
 {
+    if (const auto cached = blockStateCache_.find(name);
+        cached != blockStateCache_.end())
+        return cached->second;
     const Json json = readJson(
         namespaceRoot(assetRoot_, name) / "blockstates" /
         (name.path() + ".json")
@@ -216,12 +227,16 @@ BlockStateResource ResourcePack::loadBlockState(
     }
     if (result.variants.empty() && result.multipart.empty())
         throw std::runtime_error("Blockstate has no variants or multipart rules");
+    blockStateCache_.emplace(name, result);
     return result;
 }
 
 ModelResource ResourcePack::loadModel(
     const core::ResourceLocation& name) const
 {
+    if (const auto cached = modelCache_.find(name);
+        cached != modelCache_.end())
+        return cached->second;
     const std::string& path = name.path();
     const Json json = readJson(
         namespaceRoot(assetRoot_, name) / "models" / (path + ".json")
@@ -279,14 +294,20 @@ ModelResource ResourcePack::loadModel(
             );
         }
     }
+    modelCache_.emplace(name, result);
     return result;
 }
 
 ResolvedModel ResourcePack::resolveModel(
     const core::ResourceLocation& name) const
 {
+    if (const auto cached = resolvedModelCache_.find(name);
+        cached != resolvedModelCache_.end())
+        return cached->second;
     std::unordered_set<core::ResourceLocation, core::ResourceLocationHash> resolving;
-    return resolveModel(name, resolving);
+    ResolvedModel result = resolveModel(name, resolving);
+    resolvedModelCache_.emplace(name, result);
+    return result;
 }
 
 ResolvedModel ResourcePack::resolveModel(
@@ -295,6 +316,12 @@ ResolvedModel ResourcePack::resolveModel(
 {
     if (!resolving.insert(name).second)
         throw std::runtime_error("Cyclic model parent: " + name.toString());
+    if (const auto cached = resolvedModelCache_.find(name);
+        cached != resolvedModelCache_.end())
+    {
+        resolving.erase(name);
+        return cached->second;
+    }
     const ModelResource model = loadModel(name);
     ResolvedModel result;
     if (model.parent)
@@ -308,6 +335,7 @@ ResolvedModel ResourcePack::resolveModel(
     if (model.ambientOcclusion)
         result.ambientOcclusion = *model.ambientOcclusion;
     resolving.erase(name);
+    resolvedModelCache_.emplace(name, result);
     return result;
 }
 
@@ -339,5 +367,321 @@ core::ResourceLocation ResourcePack::resolveTexture(
     return core::ResourceLocation(
         resolveTextureValue(std::move(textureReference), model.textures)
     );
+}
+
+std::vector<core::ResourceLocation> ResourcePack::discoverJsonResources(
+    const std::filesystem::path& relativeDirectory) const
+{
+    std::vector<core::ResourceLocation> result;
+    std::error_code rootError;
+    for (const auto& namespaceEntry :
+         std::filesystem::directory_iterator(assetRoot_, rootError))
+    {
+        if (rootError || !namespaceEntry.is_directory())
+            continue;
+        const std::filesystem::path root =
+            namespaceEntry.path() / relativeDirectory;
+        std::error_code error;
+        if (!std::filesystem::is_directory(root, error))
+            continue;
+        for (const auto& entry :
+             std::filesystem::recursive_directory_iterator(root, error))
+        {
+            if (error)
+                break;
+            if (!entry.is_regular_file() ||
+                entry.path().extension() != ".json")
+                continue;
+            std::filesystem::path relative =
+                std::filesystem::relative(entry.path(), root, error);
+            if (error)
+                continue;
+            relative.replace_extension();
+            result.emplace_back(
+                namespaceEntry.path().filename().string(),
+                relative.generic_string()
+            );
+        }
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+std::vector<core::ResourceLocation> ResourcePack::blockStateNames() const
+{
+    return discoverJsonResources("blockstates");
+}
+
+std::vector<core::ResourceLocation> ResourcePack::itemModelNames() const
+{
+    return discoverJsonResources(std::filesystem::path("models") / "item");
+}
+
+std::vector<std::vector<std::pair<std::string, std::string>>>
+ResourcePack::blockStateCombinations(const core::ResourceLocation& name) const
+{
+    const BlockStateResource resource = loadBlockState(name);
+    std::map<std::string, std::vector<std::string>> values;
+    const auto addValue = [&values](std::string_view property, std::string_view text)
+    {
+        std::size_t begin = 0;
+        do
+        {
+            const std::size_t end = text.find('|', begin);
+            const std::string value(text.substr(
+                begin,
+                end == std::string_view::npos ? text.size() - begin : end - begin
+            ));
+            auto& candidates = values[std::string(property)];
+            if (std::find(candidates.begin(), candidates.end(), value) ==
+                candidates.end())
+                candidates.push_back(value);
+            if (end == std::string_view::npos)
+                break;
+            begin = end + 1U;
+        } while (begin <= text.size());
+    };
+    const auto addKey = [&addValue](std::string_view key)
+    {
+        if (key.empty() || key == "normal")
+            return;
+        std::size_t begin = 0;
+        while (begin < key.size())
+        {
+            const std::size_t end = key.find(',', begin);
+            const std::string_view part = key.substr(
+                begin,
+                end == std::string_view::npos ? key.size() - begin : end - begin
+            );
+            const std::size_t equals = part.find('=');
+            if (equals != std::string_view::npos)
+                addValue(part.substr(0, equals), part.substr(equals + 1U));
+            if (end == std::string_view::npos)
+                break;
+            begin = end + 1U;
+        }
+    };
+    for (const auto& [key, variants] : resource.variants)
+    {
+        static_cast<void>(variants);
+        addKey(key);
+    }
+    for (const MultipartPart& part : resource.multipart)
+    {
+        for (const StatePredicate& predicate : part.alternatives)
+            for (const auto& [property, value] : predicate.properties)
+                addValue(property, value);
+    }
+    for (auto& [property, candidates] : values)
+    {
+        static_cast<void>(property);
+        // Multipart JSON commonly lists only the rendered "true" branch
+        // (fences and walls are the canonical 1.12 examples). PropertyBool
+        // still has both values even when the false branch emits no model.
+        const bool booleanProperty = std::any_of(
+            candidates.begin(), candidates.end(),
+            [](const std::string& value)
+            {
+                return value == "true" || value == "false";
+            }
+        );
+        if (booleanProperty)
+        {
+            if (std::find(candidates.begin(), candidates.end(), "false") ==
+                candidates.end())
+                candidates.emplace_back("false");
+            if (std::find(candidates.begin(), candidates.end(), "true") ==
+                candidates.end())
+                candidates.emplace_back("true");
+        }
+        std::sort(candidates.begin(), candidates.end());
+    }
+
+    std::vector<std::vector<std::pair<std::string, std::string>>> states(1);
+    for (const auto& [property, candidates] : values)
+    {
+        std::vector<std::vector<std::pair<std::string, std::string>>> expanded;
+        expanded.reserve(states.size() * candidates.size());
+        for (const auto& state : states)
+        {
+            for (const std::string& value : candidates)
+            {
+                auto next = state;
+                next.emplace_back(property, value);
+                expanded.push_back(std::move(next));
+            }
+        }
+        states = std::move(expanded);
+    }
+    if (states.size() > 65536U)
+    {
+        throw std::runtime_error(
+            "Block has too many state combinations: " + name.toString()
+        );
+    }
+    return states;
+}
+
+std::vector<core::ResourceLocation> ResourcePack::lootTableNames() const
+{
+    return discoverJsonResources("loot_tables");
+}
+
+std::vector<LootStackResource> ResourcePack::rollLootTable(
+    const core::ResourceLocation& name,
+    const LootContext& context,
+    std::mt19937& random) const
+{
+    std::vector<LootStackResource> result;
+    rollLootTable(name, context, random, result, 0);
+    return result;
+}
+
+void ResourcePack::rollLootTable(
+    const core::ResourceLocation& name,
+    const LootContext& context,
+    std::mt19937& random,
+    std::vector<LootStackResource>& output,
+    int recursionDepth) const
+{
+    if (recursionDepth > 16)
+        throw std::runtime_error("Loot table recursion is too deep");
+    const Json table = readJson(
+        namespaceRoot(assetRoot_, name) / "loot_tables" /
+        (name.path() + ".json")
+    );
+    const auto integerRange = [&random](const Json& value, int fallback)
+    {
+        if (value.is_number())
+            return value.get<int>();
+        if (!value.is_object())
+            return fallback;
+        const int minimum = value.value("min", fallback);
+        const int maximum = value.value("max", minimum);
+        return std::uniform_int_distribution<int>(minimum, maximum)(random);
+    };
+    const auto conditionsPass = [&context, &random](const Json& owner)
+    {
+        if (!owner.contains("conditions"))
+            return true;
+        for (const Json& condition : owner.at("conditions"))
+        {
+            const std::string type = condition.value("condition", "");
+            if (type == "killed_by_player" && !context.killedByPlayer)
+                return false;
+            if (type == "random_chance_with_looting")
+            {
+                const float chance = condition.value("chance", 0.0f) +
+                    condition.value("looting_multiplier", 0.0f) *
+                    static_cast<float>(context.lootingLevel);
+                if (std::uniform_real_distribution<float>(0.0f, 1.0f)(random) >= chance)
+                    return false;
+            }
+            if (type == "entity_properties" &&
+                condition.contains("properties") &&
+                condition.at("properties").contains("on_fire") &&
+                condition.at("properties").at("on_fire").get<bool>() != context.onFire)
+                return false;
+        }
+        return true;
+    };
+    const auto smelted = [](const core::ResourceLocation& item)
+    {
+        static const std::unordered_map<std::string, std::string> recipes{
+            {"beef", "cooked_beef"}, {"porkchop", "cooked_porkchop"},
+            {"chicken", "cooked_chicken"}, {"rabbit", "cooked_rabbit"},
+            {"mutton", "cooked_mutton"}, {"fish", "cooked_fish"}
+        };
+        const auto found = recipes.find(item.path());
+        return found == recipes.end()
+            ? item
+            : core::ResourceLocation(item.nameSpace(), found->second);
+    };
+
+    if (!table.contains("pools"))
+        return;
+    for (const Json& pool : table.at("pools"))
+    {
+        if (!conditionsPass(pool) || !pool.contains("entries"))
+            continue;
+        const int rolls = integerRange(pool.value("rolls", Json(1)), 1);
+        for (int roll = 0; roll < rolls; ++roll)
+        {
+            std::vector<const Json*> candidates;
+            std::vector<int> weights;
+            int totalWeight = 0;
+            for (const Json& entry : pool.at("entries"))
+            {
+                if (!conditionsPass(entry))
+                    continue;
+                const int weight = std::max(
+                    0,
+                    entry.value("weight", 1) + static_cast<int>(
+                        std::floor(entry.value("quality", 0) * context.luck)
+                    )
+                );
+                if (weight == 0)
+                    continue;
+                candidates.push_back(&entry);
+                weights.push_back(weight);
+                totalWeight += weight;
+            }
+            if (candidates.empty() || totalWeight <= 0)
+                continue;
+            int choice = std::uniform_int_distribution<int>(0, totalWeight - 1)(random);
+            std::size_t selected = 0;
+            for (; selected + 1U < weights.size(); ++selected)
+            {
+                choice -= weights[selected];
+                if (choice < 0)
+                    break;
+            }
+            const Json& entry = *candidates[selected];
+            const std::string type = entry.value("type", "empty");
+            if (type == "empty")
+                continue;
+            if (type == "loot_table")
+            {
+                rollLootTable(
+                    core::ResourceLocation(entry.at("name").get<std::string>()),
+                    context, random, output, recursionDepth + 1
+                );
+                continue;
+            }
+            if (type != "item")
+                continue;
+
+            LootStackResource stack;
+            stack.item = core::ResourceLocation(entry.at("name").get<std::string>());
+            stack.count = 1;
+            if (entry.contains("functions"))
+            {
+                for (const Json& function : entry.at("functions"))
+                {
+                    if (!conditionsPass(function))
+                        continue;
+                    const std::string functionName = function.value("function", "");
+                    if (functionName == "set_count" ||
+                        functionName == "minecraft:set_count")
+                        stack.count = integerRange(function.at("count"), stack.count);
+                    else if (functionName == "looting_enchant" && context.lootingLevel > 0)
+                    {
+                        const int maximumPerLevel = function.at("count").is_object()
+                            ? function.at("count").value("max", 1) : 1;
+                        stack.count += std::uniform_int_distribution<int>(
+                            0, maximumPerLevel * context.lootingLevel
+                        )(random);
+                    }
+                    else if (functionName == "furnace_smelt")
+                        stack.item = smelted(stack.item);
+                    else if (functionName == "set_data" ||
+                             functionName == "minecraft:set_data")
+                        stack.metadata = integerRange(function.at("data"), 0);
+                }
+            }
+            if (stack.count > 0)
+                output.push_back(std::move(stack));
+        }
+    }
 }
 }

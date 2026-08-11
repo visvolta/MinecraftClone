@@ -5,6 +5,7 @@
 #include "gameplay/GameplayRegistries.h"
 
 #include <memory>
+#include <filesystem>
 #include <unordered_set>
 #include <vector>
 
@@ -13,7 +14,7 @@ namespace mc::game
 class GameBootstrap
 {
 public:
-    GameBootstrap();
+    explicit GameBootstrap(std::filesystem::path assetRoot = {});
 
     void addContentModule(std::unique_ptr<content::ContentModule> module);
     void loadContentModules();

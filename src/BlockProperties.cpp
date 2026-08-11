@@ -10,7 +10,7 @@
 namespace
 {
 constexpr std::size_t count =
-    static_cast<std::size_t>(BlockType::TNT) + 1U;
+    static_cast<std::size_t>(BlockType::Cobweb) + 1U;
 
 constexpr std::array<BlockProperties, count> properties = {{
     {0.0f, false, false},                                  // Air
@@ -86,7 +86,7 @@ constexpr std::array<BlockProperties, count> properties = {{
     {2.0f, true, false, ToolType::Axe},                    // Dark oak planks
     {0.5f, true, false, ToolType::Shovel},                 // Podzol
     {0.6f, true, false, ToolType::Shovel},                 // Mycelium
-    {0.2f, true, false, ToolType::Shovel},                 // Snow
+    {0.2f, true, false, ToolType::Shovel, 0, false},       // Snow
     {0.5f, true, false, ToolType::Pickaxe},                // Ice
     {0.4f, true, false},                                   // Cactus
     {0.0f, true, true},                                    // Sugar cane
@@ -107,7 +107,18 @@ constexpr std::array<BlockProperties, count> properties = {{
     {0.0f, true, true},                                    // Repeater
     {0.5f, true, false, ToolType::Pickaxe},                // Piston
     {0.5f, true, false, ToolType::Pickaxe},                // Sticky piston
-    {0.0f, true, true}                                     // TNT
+    {0.0f, true, true},                                    // TNT
+    {0.0f, true, true},                                    // Fern
+    {0.0f, true, true},                                    // Dead bush
+    {1.0f, true, false, ToolType::Axe},                    // Melon
+    {0.2f, true, true},                                    // Vine
+    {0.2f, true, true, ToolType::Axe},                     // Cocoa
+    {0.2f, true, false, ToolType::Axe},                    // Brown mushroom block
+    {0.2f, true, false, ToolType::Axe},                    // Red mushroom block
+    {0.2f, true, false, ToolType::Axe},                    // Mushroom stem
+    {1.5f, true, false, ToolType::Pickaxe, 0, false},      // Stone bricks
+    {1.5f, true, false, ToolType::Axe},                    // Bookshelf
+    {4.0f, true, true}                                     // Cobweb
 }};
 }
 
@@ -133,7 +144,11 @@ bool canHarvestBlock(
     if (!value.breakable || value.hardness < 0.0f)
         return false;
 
-    if (value.harvestableByHand)
+    // effectiveTool controls mining speed; requiredHarvestLevel controls
+    // whether the drop itself requires that tool. Wood, dirt, chests, crops,
+    // and similar blocks remain harvestable by hand in 1.12 even though a
+    // shovel or axe is faster.
+    if (value.harvestableByHand || value.requiredHarvestLevel < 0)
         return true;
 
     return tool.type == value.effectiveTool &&

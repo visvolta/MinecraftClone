@@ -8,8 +8,16 @@ class DecorationGenerator
 {
 public:
     void generateFlowers(WorldGenerationContext&, JavaRandom&, BlockType, int,int,int) const;
-    void generateTallGrass(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void generateTallGrass(WorldGenerationContext&, JavaRandom&, BlockType, int,int,int) const;
     void generatePumpkins(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void generateSurfacePatch(WorldGenerationContext&, JavaRandom&, BlockType, int,int,int,int) const;
+    void generateReeds(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void generateCactus(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void generateMelons(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void generateVines(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void generateCocoa(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    bool generateBigMushroom(WorldGenerationContext&, JavaRandom&, int,int,int) const;
+    void freezeAndSnow(WorldGenerationContext&, int,int,int,int) const;
 private:
     static bool canFlowerStay(
         const WorldGenerationContext&,

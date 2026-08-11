@@ -130,6 +130,7 @@ int main()
     source.player.survival.saturation = 2.5f;
     source.player.survival.experienceLevel = 7;
     source.inventory[Inventory::OFFHAND_SLOT] = {ItemType::Shield, 1};
+    source.inventory[0] = {ItemType::RawBeef, 17};
     Chunk chunk(4, -2);
     chunk.setBlockState(
         1, 60, 2,
@@ -143,7 +144,7 @@ int main()
         mc::core::ResourceLocation("save_test:machine_casing")
     );
     assert(modState.blockRuntimeId() >
-           static_cast<mc::core::RuntimeId>(BlockType::TNT));
+           static_cast<mc::core::RuntimeId>(BlockType::Cobweb));
     chunk.setBlockState(3, 62, 4, modState);
     chunk.setBlockState(5, 220, 6, mc::content::BlockState(BlockType::Stone));
     source.modifiedChunks.push_back(chunk.snapshot());
@@ -152,6 +153,7 @@ int main()
         sourceEntities.getOrCreateFurnace({2, 61, 3});
     sourceFurnace.getSlot(FurnaceBlockEntity::Input) =
         {BlockType::IronOre, 4};
+    sourceEntities.getOrCreateSpawner({6, 22, 7}).setMobId(1);
     source.blockEntities = sourceEntities.snapshot();
 
     const std::filesystem::path path =
@@ -168,17 +170,20 @@ int main()
     raw.seekg(8);
     std::uint32_t version = 0;
     raw.read(reinterpret_cast<char*>(&version), sizeof(version));
-    assert(version == 5);
+    assert(version == 6);
     raw.close();
 
     const auto loaded = SaveGame::load(path, message, bootstrap.content());
     assert(loaded);
     assert(loaded->seed == source.seed);
     assert(loaded->worldTime == source.worldTime);
+    assert(loaded->generationVersion == source.generationVersion);
     assert(loaded->spawnPosition == source.spawnPosition);
     assert(loaded->player.survival.foodLevel == 13);
     assert(loaded->player.survival.experienceLevel == 7);
     assert(loaded->inventory[Inventory::OFFHAND_SLOT].item == ItemType::Shield);
+    assert(loaded->inventory[0].item == ItemType::RawBeef);
+    assert(loaded->inventory[0].count == 17);
     assert(loaded->modifiedChunks.size() == 1);
     Chunk restored;
     restored.restore(loaded->modifiedChunks.front());
@@ -187,16 +192,47 @@ int main()
            mc::content::BlockState(BlockType::Furnace, 5));
     assert(restored.getBlockState(3, 62, 4) == modState);
     assert(restored.getBlockState(5, 220, 6).block() == BlockType::Stone);
-    assert(loaded->blockEntities.size() == 1);
-    assert(loaded->blockEntities.front().type.toString() ==
-           "minecraft:furnace");
+    assert(loaded->blockEntities.size() == 2);
     BlockEntityStore loadedEntities;
     loadedEntities.restore(loaded->blockEntities);
     assert(loadedEntities.getFurnace({2, 61, 3})->getSlot(
         FurnaceBlockEntity::Input).count == 4);
+    assert(loadedEntities.getSpawner({6, 22, 7})->mobId() == 1);
 
-    // Version 4 had all 256-high/survival data but no persisted world spawn.
-    // Removing the three new integers creates a byte-accurate migration case.
+    // Version 5 includes the persisted spawn but predates generator
+    // versioning. It must remain readable and opt into the legacy generator
+    // marker without shifting the following player data.
+    const std::filesystem::path versionFivePath =
+        std::filesystem::temp_directory_path() /
+        "minecraftclone-version-five-save-test.dat";
+    std::ifstream versionSixInput(path, std::ios::binary);
+    std::vector<char> versionFiveBytes(
+        (std::istreambuf_iterator<char>(versionSixInput)),
+        std::istreambuf_iterator<char>()
+    );
+    const std::uint32_t versionFive = 5;
+    std::memcpy(versionFiveBytes.data() + 8, &versionFive, sizeof(versionFive));
+    constexpr std::size_t generationOffset = 8 + 4 + 4 + 8;
+    versionFiveBytes.erase(
+        versionFiveBytes.begin() + static_cast<std::ptrdiff_t>(generationOffset),
+        versionFiveBytes.begin() + static_cast<std::ptrdiff_t>(generationOffset + 4)
+    );
+    std::ofstream versionFiveOutput(versionFivePath, std::ios::binary);
+    versionFiveOutput.write(
+        versionFiveBytes.data(),
+        static_cast<std::streamsize>(versionFiveBytes.size())
+    );
+    versionFiveOutput.close();
+    const auto migratedVersionFive = SaveGame::load(
+        versionFivePath, message, bootstrap.content()
+    );
+    assert(migratedVersionFive);
+    assert(migratedVersionFive->generationVersion == 1);
+    assert(migratedVersionFive->spawnPosition == source.spawnPosition);
+
+    // Version 4 had all 256-high/survival data but no generation version or
+    // persisted world spawn. Removing those four integers creates an exact
+    // migration case.
     const std::filesystem::path versionFourPath =
         std::filesystem::temp_directory_path() /
         "minecraftclone-version-four-save-test.dat";
@@ -207,10 +243,9 @@ int main()
     );
     const std::uint32_t versionFour = 4;
     std::memcpy(versionFourBytes.data() + 8, &versionFour, sizeof(versionFour));
-    constexpr std::size_t spawnOffset = 8 + 4 + 4 + 8;
     versionFourBytes.erase(
-        versionFourBytes.begin() + static_cast<std::ptrdiff_t>(spawnOffset),
-        versionFourBytes.begin() + static_cast<std::ptrdiff_t>(spawnOffset + 12)
+        versionFourBytes.begin() + static_cast<std::ptrdiff_t>(generationOffset),
+        versionFourBytes.begin() + static_cast<std::ptrdiff_t>(generationOffset + 16)
     );
     std::ofstream versionFourOutput(versionFourPath, std::ios::binary);
     versionFourOutput.write(
@@ -222,6 +257,7 @@ int main()
         versionFourPath, message, bootstrap.content()
     );
     assert(migratedVersionFour);
+    assert(migratedVersionFour->generationVersion == 1);
     assert(!migratedVersionFour->spawnPosition);
     assert(migratedVersionFour->player.survival.foodLevel == 13);
     assert(migratedVersionFour->modifiedChunks.front().paletteIndices.size() ==
@@ -234,6 +270,8 @@ int main()
     std::filesystem::remove(legacyPath.string() + ".bak", ignored);
     std::filesystem::remove(versionFourPath, ignored);
     std::filesystem::remove(versionFourPath.string() + ".bak", ignored);
+    std::filesystem::remove(versionFivePath, ignored);
+    std::filesystem::remove(versionFivePath.string() + ".bak", ignored);
     writeLegacyV1Fixture(legacyPath);
     const auto migrated = SaveGame::load(
         legacyPath,

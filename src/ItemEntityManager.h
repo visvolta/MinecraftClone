@@ -37,6 +37,8 @@ public:
         const glm::vec3& lookDirection
     );
 
+    void spawnMobDrop(ItemStack stack, const glm::vec3& position);
+
     void spawnContainerDrops(
         std::span<const ItemStack> contents,
         const glm::ivec3& blockPosition

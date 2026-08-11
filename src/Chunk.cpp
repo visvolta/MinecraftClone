@@ -59,7 +59,7 @@ bool Chunk::setBlockAndMetadata(
 
 std::uint8_t Chunk::getMetadata(int x, int y, int z) const
 {
-    return getBlockState(x, y, z).properties();
+    return static_cast<std::uint8_t>(getBlockState(x, y, z).properties());
 }
 
 bool Chunk::setMetadata(int x, int y, int z, std::uint8_t blockMetadata)

@@ -52,7 +52,25 @@ enum class BlockDropRule
     OakSapling,
     SpruceSapling,
     BirchSapling,
-    Furnace
+    JungleSapling,
+    AcaciaSapling,
+    DarkOakSapling,
+    Furnace,
+    Farmland,
+    GlassLike,
+    Snowball,
+    GlowstoneDust,
+    RedstoneDust,
+    WheatCrop,
+    CarrotCrop,
+    PotatoCrop,
+    BeetrootCrop,
+    MelonSlices,
+    CocoaBeans,
+    Books,
+    CobwebString,
+    DeadBushSticks,
+    MushroomCap
 };
 
 struct BlockTraits
@@ -82,20 +100,25 @@ struct BlockBehaviour
 struct BlockPropertyDefinition
 {
     std::string name;
-    std::uint8_t mask = 0;
-    std::uint8_t minimumValue = 0;
-    std::uint8_t maximumValue = 0;
+    std::uint16_t mask = 0;
+    std::uint16_t minimumValue = 0;
+    std::uint16_t maximumValue = 0;
     std::vector<std::string> valueNames;
 
-    [[nodiscard]] bool accepts(std::uint8_t properties) const noexcept;
+    [[nodiscard]] bool accepts(std::uint16_t properties) const noexcept;
 };
 
 struct BlockStateSchema
 {
-    std::uint8_t defaultProperties = 0;
+    std::uint16_t defaultProperties = 0;
     std::vector<BlockPropertyDefinition> properties;
+    // Resource-pack blocks use an explicit compact state table. This supports
+    // arbitrary 1.12 properties without trying to squeeze every combination
+    // into the four legacy metadata bits.
+    std::vector<std::vector<std::pair<std::string, std::string>>> states;
 
     [[nodiscard]] bool accepts(BlockState state) const noexcept;
+    [[nodiscard]] std::size_t stateCount() const noexcept;
 };
 
 struct BlockTextures
@@ -113,7 +136,7 @@ struct BlockTextures
 
     [[nodiscard]] const core::ResourceLocation* resolve(
         BlockFace face,
-        std::uint8_t metadata
+        std::uint16_t metadata
     ) const noexcept;
 };
 
@@ -187,7 +210,7 @@ public:
     ) const noexcept;
     [[nodiscard]] std::optional<BlockState> state(
         const core::ResourceLocation& name,
-        std::uint8_t properties = 0
+        std::uint16_t properties = 0
     ) const noexcept;
     [[nodiscard]] std::optional<BlockState> state(
         const core::ResourceLocation& name,

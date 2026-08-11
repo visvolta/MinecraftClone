@@ -129,6 +129,7 @@ add_library(minecraft_content STATIC
     src/BlockShape.cpp
     src/Item.cpp
     src/content/ContentCatalog.cpp
+    src/content/BlockStateLogic.cpp
     src/content/MinecraftContent.cpp
     src/content/resources/ResourcePack.cpp
 )
@@ -160,6 +161,7 @@ add_library(minecraft_client STATIC
     src/Texture2D.cpp
     src/TextureAtlas.cpp
     src/client/render/ModelBakery.cpp
+    src/client/render/MobModel.cpp
     src/client/render/RuntimeTextureAtlas.cpp
 )
 target_include_directories(minecraft_client PUBLIC
@@ -191,6 +193,8 @@ add_library(minecraft_world STATIC
     src/worldgen/MinableGenerator.cpp
     src/worldgen/OreGenerator.cpp
     src/worldgen/PopulationGenerator.cpp
+    src/worldgen/RavineGenerator.cpp
+    src/worldgen/StructureGenerator.cpp
     src/worldgen/WorldGenerationContext.cpp
     src/worldgen/Biome.cpp
     src/worldgen/BiomeMap.cpp
@@ -202,7 +206,7 @@ target_include_directories(minecraft_world PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(minecraft_world PUBLIC
-    minecraft_core
+    minecraft_content
     glm::glm
 )
 
@@ -254,6 +258,9 @@ set(MINECRAFT_CLONE_SOURCES
     src/ItemEntity.cpp
     src/ItemEntityManager.cpp
     src/ItemEntityRenderer.cpp
+    src/client/render/MobEntityRenderer.cpp
+    src/entity/MobEntity.cpp
+    src/entity/MobEntityManager.cpp
     src/Player.cpp
     src/PlayerHUD.cpp
     src/PostProcessor.cpp
@@ -368,6 +375,7 @@ if(BUILD_TESTING)
 
     add_executable(minecraft_gameplay_data_tests
         tests/GameplayDataTests.cpp
+        src/BlockDrops.cpp
         src/BlockEntity.cpp
         src/CraftingRecipe.cpp
         src/Furnace.cpp
@@ -412,7 +420,22 @@ if(BUILD_TESTING)
         NAME minecraft_migration_stages_tests
         COMMAND minecraft_migration_stages_tests
     )
+
+    add_executable(minecraft_world_generation_tests
+        tests/WorldGenerationTests.cpp
+    )
+    target_include_directories(minecraft_world_generation_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(minecraft_world_generation_tests PRIVATE
+        minecraft_world
+    )
+    add_test(
+        NAME minecraft_world_generation_tests
+        COMMAND minecraft_world_generation_tests
+    )
     set_tests_properties(
+        minecraft_registry_tests
         minecraft_resource_pack_tests
         minecraft_gameplay_data_tests
         minecraft_migration_stages_tests

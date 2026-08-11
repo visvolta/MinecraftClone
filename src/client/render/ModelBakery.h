@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BlockShape.h"
 #include "TextureAtlas.h"
 #include "content/BlockState.h"
 #include "content/resources/ResourcePack.h"
@@ -30,6 +31,11 @@ struct BakedQuad
 struct BakedModel
 {
     std::vector<BakedQuad> quads;
+    // One axis-aligned box per resolved model element. The renderer keeps the
+    // original quads, while collision/raycasting reuse these boxes so every
+    // resource-defined state (stairs, slabs, doors, fences, panes, and modded
+    // equivalents) has geometry matching the selected 1.12 model.
+    std::vector<BlockBox> elementBoxes;
     std::unordered_map<
         std::string,
         content::resources::DisplayTransform

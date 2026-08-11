@@ -13,6 +13,14 @@ namespace ChunkMeshing
     int z
 ) noexcept;
 
+[[nodiscard]] mc::content::BlockState actualState(
+    const ChunkMeshInput& input,
+    int x,
+    int y,
+    int z,
+    mc::content::BlockState state
+);
+
 [[nodiscard]] BlockType sampleBlock(
     const ChunkMeshInput& input,
     int x,
@@ -30,6 +38,11 @@ namespace ChunkMeshing
 [[nodiscard]] bool shouldRenderFace(
     BlockType block,
     BlockType neighbour) noexcept;
+[[nodiscard]] bool shouldRenderFace(
+    mc::content::BlockState block,
+    mc::content::BlockState neighbour) noexcept;
+[[nodiscard]] bool occludesNeighbourFace(
+    mc::content::BlockState state) noexcept;
 
 [[nodiscard]] bool shouldRenderFastLeafFace(
     BlockType leaf,

@@ -39,4 +39,5 @@ private:
     bool newWorldSeedInitialized_ = false;
     int newWorldSeed_ = 1337;
     std::string worldResetStatus_;
+    std::string locateStatus_;
 };

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string_view>
 #include <unordered_map>
 
@@ -100,9 +101,6 @@ const ModelVariant& chooseWeighted(
     int totalWeight = 0;
     for (const ModelVariant& variant : variants)
         totalWeight += variant.weight;
-    seed ^= seed >> 33U;
-    seed *= 0xff51afd7ed558ccdULL;
-    seed ^= seed >> 33U;
     int choice = static_cast<int>(seed % static_cast<std::uint64_t>(totalWeight));
     for (const ModelVariant& variant : variants)
     {
@@ -193,8 +191,9 @@ std::array<glm::vec2, 4> faceUv(
     const ModelFace& face,
     const ModelElement& element,
     BlockFace direction,
-    int variantRotation,
-    bool uvLock)
+    bool uvLock,
+    const std::array<glm::vec3, 4>& transformedPositions,
+    BlockFace transformedFace)
 {
     const std::array<float, 4> uv = face.uv.value_or(defaultUv(element, direction));
     std::array<glm::vec2, 4> result{{
@@ -203,7 +202,49 @@ std::array<glm::vec2, 4> faceUv(
     }};
     int turns = (face.rotation / 90) % 4;
     if (uvLock)
-        turns = (turns + 4 - (variantRotation / 90) % 4) % 4;
+    {
+        // UV lock is face-local in 1.12. A single inverse of x+y rotation is
+        // incorrect for vertical faces and for variants rotated on both axes.
+        // Pick the quarter turn whose texture gradients align with the
+        // canonical world-space axes of the transformed face. This is the
+        // geometric equivalent of FaceBakery.applyUVLock and also works for
+        // modded element sizes and element rotations.
+        ModelElement unit;
+        unit.from = {0.0f, 0.0f, 0.0f};
+        unit.to = {16.0f, 16.0f, 16.0f};
+        const auto canonical = faceVertices(unit, transformedFace);
+        const glm::vec3 canonicalU = glm::normalize(canonical[1] - canonical[0]);
+        const glm::vec3 canonicalV = glm::normalize(canonical[3] - canonical[0]);
+        constexpr std::array<glm::vec2, 4> basis{{
+            {0, 0}, {1, 0}, {1, 1}, {0, 1}
+        }};
+        float bestScore = -std::numeric_limits<float>::max();
+        int correction = 0;
+        for (int candidate = 0; candidate < 4; ++candidate)
+        {
+            glm::vec3 gradientU(0.0f);
+            glm::vec3 gradientV(0.0f);
+            for (std::size_t vertex = 0; vertex < 4; ++vertex)
+            {
+                const glm::vec2 coordinate =
+                    basis[(vertex + static_cast<std::size_t>(candidate)) % 4U];
+                gradientU += transformedPositions[vertex] * (coordinate.x - 0.5f);
+                gradientV += transformedPositions[vertex] * (coordinate.y - 0.5f);
+            }
+            if (glm::length(gradientU) < 0.00001f ||
+                glm::length(gradientV) < 0.00001f)
+                continue;
+            const float score =
+                glm::dot(glm::normalize(gradientU), canonicalU) +
+                glm::dot(glm::normalize(gradientV), canonicalV);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                correction = candidate;
+            }
+        }
+        turns = (turns + correction) % 4;
+    }
     std::rotate(result.begin(), result.begin() + turns, result.end());
     return result;
 }
@@ -257,6 +298,38 @@ void appendVariant(
     for (const ModelElement& element : model.elements)
     {
         const glm::mat4 transform = variantMatrix * elementTransform(element);
+        const glm::vec3 from(
+            element.from[0] / 16.0f,
+            element.from[1] / 16.0f,
+            element.from[2] / 16.0f
+        );
+        const glm::vec3 to(
+            element.to[0] / 16.0f,
+            element.to[1] / 16.0f,
+            element.to[2] / 16.0f
+        );
+        glm::vec3 minimum(std::numeric_limits<float>::max());
+        glm::vec3 maximum(std::numeric_limits<float>::lowest());
+        for (int corner = 0; corner < 8; ++corner)
+        {
+            const glm::vec3 local(
+                (corner & 1) != 0 ? to.x : from.x,
+                (corner & 2) != 0 ? to.y : from.y,
+                (corner & 4) != 0 ? to.z : from.z
+            );
+            const glm::vec3 transformed = glm::vec3(
+                transform * glm::vec4(local, 1.0f)
+            );
+            minimum = glm::min(minimum, transformed);
+            maximum = glm::max(maximum, transformed);
+        }
+        constexpr float boxEpsilon = 0.00001f;
+        if (maximum.x - minimum.x > boxEpsilon &&
+            maximum.y - minimum.y > boxEpsilon &&
+            maximum.z - minimum.z > boxEpsilon)
+        {
+            result.elementBoxes.push_back({minimum, maximum});
+        }
         for (const auto& [faceName, modelFace] : element.faces)
         {
             const BlockFace originalFace = faceFromName(faceName);
@@ -278,8 +351,8 @@ void appendVariant(
                 quad.cullFace = closestFace(cullNormal);
             }
             quad.textureCoordinates = faceUv(
-                modelFace, element, originalFace,
-                variant.rotationX + variant.rotationY, variant.uvLock
+                modelFace, element, originalFace, variant.uvLock,
+                quad.positions, quad.face
             );
             quad.texture = resources.resolveTexture(modelFace.texture, model);
             quad.tintIndex = modelFace.tintIndex;

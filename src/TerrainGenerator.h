@@ -6,6 +6,8 @@
 #include "worldgen/CaveGenerator.h"
 #include "worldgen/JavaRandom.h"
 #include "worldgen/PopulationGenerator.h"
+#include "worldgen/RavineGenerator.h"
+#include "worldgen/StructureGenerator.h"
 #include "worldgen/SurfaceBuilder.h"
 
 #include <cstdint>
@@ -19,6 +21,7 @@ class Chunk;
 class TerrainGenerator
 {
 public:
+    static constexpr std::uint32_t CURRENT_GENERATION_VERSION = 3;
     explicit TerrainGenerator(int seed = 1337);
     ~TerrainGenerator();
 
@@ -28,6 +31,11 @@ public:
     [[nodiscard]] int getTerrainHeight(
         int worldX,
         int worldZ) const;
+    [[nodiscard]] std::optional<StructureLocation> findNearestStructure(
+        WorldStructure structure,
+        int worldX,
+        int worldZ,
+        int maximumRegionRadius = 100) const;
 
 private:
     int seed_ = 1337;
@@ -48,6 +56,8 @@ private:
     BiomeMap biomeMap_;
     SurfaceBuilder surfaceBuilder_;
     CaveGenerator caveGenerator_;
+    RavineGenerator ravineGenerator_;
+    StructureGenerator structureGenerator_;
     PopulationGenerator populationGenerator_;
 
     mutable std::vector<double> densityField_;

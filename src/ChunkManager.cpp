@@ -104,7 +104,9 @@ std::uint8_t ChunkManager::getMetadataWorld(
     int worldY,
     int worldZ) const
 {
-    return getBlockStateWorld(worldX, worldY, worldZ).properties();
+    return static_cast<std::uint8_t>(
+        getBlockStateWorld(worldX, worldY, worldZ).properties()
+    );
 }
 
 bool ChunkManager::setBlockAndMetadataWorld(

@@ -37,7 +37,7 @@ void BlockBreakingController::update(
         hit.blockPosition.z
     );
     const BlockType block = state.block();
-    const std::uint8_t metadata = state.properties();
+    const std::uint8_t metadata = static_cast<std::uint8_t>(state.properties());
 
     if (!getBlockProperties(block).breakable)
     {

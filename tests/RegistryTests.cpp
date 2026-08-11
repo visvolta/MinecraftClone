@@ -5,6 +5,7 @@
 #include "game/GameBootstrap.h"
 
 #include <cassert>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -104,7 +105,7 @@ int main()
     const mc::content::ContentCatalog& content = bootstrap.content();
     assert(content.frozen());
     assert(content.blocks().size() ==
-           static_cast<std::size_t>(BlockType::TNT) + 2U);
+           static_cast<std::size_t>(BlockType::Cobweb) + 2U);
     assert(content.blocks().find(
         ResourceLocation("test:decorative_block")
     ) != nullptr);
@@ -112,7 +113,7 @@ int main()
         ResourceLocation("test:decorative_block")
     );
     assert(modState.blockRuntimeId() >
-           static_cast<mc::core::RuntimeId>(BlockType::TNT));
+           static_cast<mc::core::RuntimeId>(BlockType::Cobweb));
     assert(bootstrap.gameplay().dimensions().size() == 3U);
     assert(bootstrap.gameplay().mobs().size() >= 8U);
     assert(bootstrap.gameplay().structures().size() >= 6U);
@@ -146,6 +147,90 @@ int main()
     assert(!content.isValidState(
         mc::content::BlockState(BlockType::Stone, 1)
     ));
+
+    mc::game::GameBootstrap resourceBootstrap(std::filesystem::path("assets"));
+    resourceBootstrap.loadContentModules();
+    resourceBootstrap.freezeRegistries();
+    const mc::content::ContentCatalog& complete = resourceBootstrap.content();
+    assert(complete.blocks().size() >= 407U);
+    assert(complete.items().size() >= 717U);
+    assert(complete.lootTables().size() >= 83U);
+    assert(resourceBootstrap.gameplay().mobs().size() >= 49U);
+    assert(complete.entityTypes().size() ==
+           resourceBootstrap.gameplay().mobs().size() + 1U);
+    const auto* zombie = resourceBootstrap.gameplay().mobs().find(
+        ResourceLocation("minecraft:zombie")
+    );
+    assert(zombie != nullptr);
+    assert(std::abs(zombie->maximumHealth - 20.0f) < 0.001f);
+    assert(std::abs(zombie->movementSpeed - 0.23f) < 0.001f);
+    assert(zombie->burnsInDaylight);
+    assert(zombie->texture.toString() ==
+           "minecraft:entity/zombie/zombie");
+    const auto* skeleton = resourceBootstrap.gameplay().mobs().find(
+        ResourceLocation("minecraft:skeleton")
+    );
+    assert(skeleton != nullptr);
+    assert(skeleton->model == mc::gameplay::MobModelKind::Skeleton);
+    assert(skeleton->attackKind == mc::gameplay::MobAttackKind::Ranged);
+    assert(mc::gameplay::hasAiGoal(
+        skeleton->aiGoals, mc::gameplay::MobAiGoal::AvoidSun
+    ));
+    const auto* enderman = resourceBootstrap.gameplay().mobs().find(
+        ResourceLocation("minecraft:enderman")
+    );
+    assert(enderman != nullptr);
+    assert(!mc::gameplay::hasAiGoal(
+        enderman->aiGoals, mc::gameplay::MobAiGoal::AttackPlayer
+    ));
+    assert(mc::gameplay::hasAiGoal(
+        enderman->aiGoals, mc::gameplay::MobAiGoal::HurtByTarget
+    ));
+    for (const auto& entry : resourceBootstrap.gameplay().mobs().entries())
+    {
+        constexpr std::string_view prefix = "entity/";
+        assert(entry.value.texture.nameSpace() == "minecraft");
+        assert(entry.value.texture.path().starts_with(prefix));
+        const std::filesystem::path texture =
+            std::filesystem::path("assets") / "minecraft" / "textures" /
+            (entry.value.texture.path() + ".png");
+        assert(std::filesystem::is_regular_file(texture));
+        if (entry.value.overlayTexture.path() != "entity/empty")
+        {
+            const std::filesystem::path overlay =
+                std::filesystem::path("assets") / "minecraft" / "textures" /
+                (entry.value.overlayTexture.path() + ".png");
+            assert(std::filesystem::is_regular_file(overlay));
+        }
+        for (const ResourceLocation& variant : entry.value.variantTextures)
+        {
+            const std::filesystem::path variantFile =
+                std::filesystem::path("assets") / "minecraft" / "textures" /
+                (variant.path() + ".png");
+            assert(std::filesystem::is_regular_file(variantFile));
+        }
+        for (const ResourceLocation& variant :
+             entry.value.variantOverlayTextures)
+        {
+            const std::filesystem::path variantFile =
+                std::filesystem::path("assets") / "minecraft" / "textures" /
+                (variant.path() + ".png");
+            assert(std::filesystem::is_regular_file(variantFile));
+        }
+        assert(entry.value.model != mc::gameplay::MobModelKind::Count);
+        assert(entry.value.width > 0.0f);
+        assert(entry.value.height > 0.0f);
+        assert(entry.value.eyeHeight > 0.0f);
+        assert(entry.value.maximumHealth > 0.0f);
+    }
+    const auto oakFence = complete.state(
+        ResourceLocation("minecraft:fence"),
+        std::array<std::pair<std::string, std::string>, 2>{
+            std::pair{"north", "true"}, std::pair{"east", "true"}
+        }
+    );
+    assert(oakFence);
+    assert(complete.serializeStateProperties(*oakFence).size() == 4U);
 
     const std::filesystem::path textureRoot =
         std::filesystem::path("assets") / "textures" / "blocks";

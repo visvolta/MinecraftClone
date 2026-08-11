@@ -23,7 +23,10 @@ enum class BlockType : std::uint8_t
     Farmland, Wheat, Carrots, Potatoes, Beetroots, Glass,
     Netherrack, SoulSand, NetherBricks, Glowstone, EndStone,
     RedstoneWire, RedstoneTorch, Lever, Repeater,
-    Piston, StickyPiston, TNT
+    Piston, StickyPiston, TNT,
+    Fern, DeadBush, Melon, Vine, Cocoa,
+    BrownMushroomBlock, RedMushroomBlock, MushroomStem,
+    StoneBricks, Bookshelf, Cobweb
 };
 
 [[nodiscard]] constexpr bool isAir(BlockType b) noexcept { return b == BlockType::Air; }
@@ -54,6 +57,9 @@ enum class BlockType : std::uint8_t
     return b == BlockType::BrownMushroom || b == BlockType::RedMushroom ||
            b == BlockType::TallGrass || b == BlockType::Rose ||
            b == BlockType::Dandelion || b == BlockType::SugarCane ||
+           b == BlockType::Fern || b == BlockType::DeadBush ||
+           b == BlockType::Vine || b == BlockType::Cocoa ||
+           b == BlockType::Cobweb ||
            isCrop(b);
 }
 [[nodiscard]] constexpr bool isCrossModel(BlockType b) noexcept { return isPlant(b); }

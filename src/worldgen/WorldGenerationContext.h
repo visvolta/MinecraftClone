@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Block.h"
+#include "content/BlockState.h"
 #include "worldgen/Biome.h"
 
 #include <cstddef>
@@ -24,9 +25,18 @@ public:
     );
 
     [[nodiscard]] BlockType getBlock(int worldX, int worldY, int worldZ) const;
+    [[nodiscard]] mc::content::BlockState getBlockState(
+        int worldX, int worldY, int worldZ
+    ) const;
     [[nodiscard]] bool isInsideTarget(int worldX, int worldY, int worldZ) const noexcept;
 
     bool setBlock(int worldX, int worldY, int worldZ, BlockType block);
+    bool setBlockState(
+        int worldX,
+        int worldY,
+        int worldZ,
+        mc::content::BlockState state
+    );
     void beginIsolatedFeature();
     void finishIsolatedFeature(bool commit);
     [[nodiscard]] int getHeightValue(int worldX, int worldZ) const;
@@ -52,7 +62,7 @@ private:
     FallbackSampler fallbackSampler_;
     HeightSampler heightSampler_;
     ClimateSampler climateSampler_;
-    std::unordered_map<FeaturePosition, BlockType, FeaturePositionHash>
+    std::unordered_map<FeaturePosition, mc::content::BlockState, FeaturePositionHash>
         stagedFeatureBlocks_;
     bool isolatedFeatureActive_ = false;
 };

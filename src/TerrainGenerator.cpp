@@ -47,6 +47,8 @@ TerrainGenerator::TerrainGenerator(int seed)
       mobSpawnerNoise_(generatorRandom_, 8),
       biomeMap_(seed),
       caveGenerator_(seed),
+      ravineGenerator_(seed),
+      structureGenerator_(seed),
       populationGenerator_(seed)
 {
 }
@@ -93,6 +95,7 @@ void TerrainGenerator::generateChunk(
         }
     );
 
+    structureGenerator_.populate(chunk, context);
     populationGenerator_.populate(chunk, context);
 }
 
@@ -155,7 +158,23 @@ void TerrainGenerator::generateTerrainOnly(Chunk& chunk) const
 
     // ChunkGeneratorOverworld carves caves after biome surface replacement.
     caveGenerator_.generate(chunk);
+    ravineGenerator_.generate(chunk);
 
+}
+
+std::optional<StructureLocation> TerrainGenerator::findNearestStructure(
+    WorldStructure structure,
+    int worldX,
+    int worldZ,
+    int maximumRegionRadius) const
+{
+    return structureGenerator_.findNearest(
+        structure, worldX, worldZ, maximumRegionRadius,
+        [this](int x, int z)
+        {
+            return biomeMap_.sample(x, z);
+        }
+    );
 }
 
 const Chunk& TerrainGenerator::terrainChunkAt(int chunkX, int chunkZ) const

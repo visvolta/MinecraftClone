@@ -119,6 +119,7 @@ std::optional<int> DebugOverlay::draw(
     );
     ImGui::Text("Chunk XZ: %d / %d", chunkX, chunkZ);
     ImGui::Text("Biome: %s", biomeName(biome));
+    ImGui::Text("World-gen version: %u", world.getGenerationVersion());
     ImGui::Text("Day time: %d", atmosphere.getDayTime());
 
     ImGui::Separator();
@@ -228,6 +229,38 @@ std::optional<int> DebugOverlay::draw(
 
     if (player.isNoClip())
         ImGui::TextDisabled("Fly: WASD, Space, Shift");
+
+    ImGui::SeparatorText("Locate structure");
+    const auto locate = [&](WorldStructure structure)
+    {
+        const auto found = world.findNearestStructure(
+            structure,
+            static_cast<int>(std::floor(playerPosition.x)),
+            static_cast<int>(std::floor(playerPosition.z))
+        );
+        if (found)
+        {
+            locateStatus_ = std::string(structureName(structure)) + " at " +
+                std::to_string(found->blockX) + ", " +
+                std::to_string(found->blockZ) + " (" +
+                biomeName(found->biome) + ")";
+        }
+        else
+        {
+            locateStatus_ = std::string("No ") + structureName(structure) +
+                " found in search radius";
+        }
+    };
+    if (ImGui::Button("Village"))
+        locate(WorldStructure::Village);
+    ImGui::SameLine();
+    if (ImGui::Button("Temple"))
+        locate(WorldStructure::Temple);
+    ImGui::SameLine();
+    if (ImGui::Button("Mineshaft"))
+        locate(WorldStructure::Mineshaft);
+    if (!locateStatus_.empty())
+        ImGui::TextWrapped("%s", locateStatus_.c_str());
 
     ImGui::SeparatorText("World reset");
     if (!newWorldSeedInitialized_)

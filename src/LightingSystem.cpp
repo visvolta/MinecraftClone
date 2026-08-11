@@ -191,7 +191,7 @@ LightingSystem::UpdatedChunk LightingSystem::rebuildChunkLighting(
     std::array<std::uint8_t, 256> emissionCache{};
     opacityCache.fill(15);
     for (int value = 0;
-         value <= static_cast<int>(BlockType::TNT);
+         value <= static_cast<int>(BlockType::Cobweb);
          ++value)
     {
         const BlockType block = static_cast<BlockType>(value);

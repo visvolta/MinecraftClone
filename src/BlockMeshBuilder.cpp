@@ -1,9 +1,12 @@
 #include "BlockMeshBuilder.h"
 
 #include "BlockShape.h"
+#include "BlockModelSeed.h"
 #include "ChunkMeshing.h"
 #include "FluidMeshBuilder.h"
 #include "TextureAtlas.h"
+#include "client/render/ModelBakery.h"
+#include "content/ContentCatalog.h"
 
 #include <array>
 #include <cmath>
@@ -126,9 +129,9 @@ AtlasUV cropUv(
     };
 }
 
-bool blocksAmbientLight(BlockType block)
+bool blocksAmbientLight(mc::content::BlockState state)
 {
-    return getBlockShape(block).occludesNeighbourFaces;
+    return getBlockShape(state).occludesNeighbourFaces;
 }
 
 float directionalShade(const glm::ivec3& normal)
@@ -189,10 +192,10 @@ float vertexBrightness(
     const glm::ivec3 sideB = faceSample + sideBOffset;
     const glm::ivec3 corner = faceSample + sideAOffset + sideBOffset;
     const bool sideABlocked = blocksAmbientLight(
-        ChunkMeshing::sampleBlock(input, sideA.x, sideA.y, sideA.z)
+        ChunkMeshing::sampleState(input, sideA.x, sideA.y, sideA.z)
     );
     const bool sideBBlocked = blocksAmbientLight(
-        ChunkMeshing::sampleBlock(input, sideB.x, sideB.y, sideB.z)
+        ChunkMeshing::sampleState(input, sideB.x, sideB.y, sideB.z)
     );
 
     const int sideALight = ChunkMeshing::sampleLight(
@@ -213,7 +216,7 @@ float vertexBrightness(
     const bool cornerBlocked = sideABlocked && sideBBlocked
         ? true
         : blocksAmbientLight(
-            ChunkMeshing::sampleBlock(input, corner.x, corner.y, corner.z)
+            ChunkMeshing::sampleState(input, corner.x, corner.y, corner.z)
           );
     const int occluders = static_cast<int>(sideABlocked) +
         static_cast<int>(sideBBlocked) + static_cast<int>(cornerBlocked);
@@ -236,12 +239,13 @@ glm::vec3 tintFor(
         return map.getGrassColor(
             temperature, humidity, biome, worldX, worldZ
         );
-    if (block == BlockType::TallGrass)
+    if (block == BlockType::TallGrass || block == BlockType::Fern)
         return map.getGrassColor(
             temperature, humidity, biome, worldX, worldZ
         );
-    if (isLeaf(block) && block != BlockType::SpruceLeaves &&
-        block != BlockType::BirchLeaves)
+    if (block == BlockType::Vine ||
+        (isLeaf(block) && block != BlockType::SpruceLeaves &&
+         block != BlockType::BirchLeaves))
         return map.getFoliageColor(
             temperature, humidity, biome, worldX, worldZ
         );
@@ -262,7 +266,8 @@ glm::vec3 blendedTintFor(
 {
     const bool biomeTinted =
         (block == BlockType::Grass && face == BlockFace::Top) ||
-        block == BlockType::TallGrass ||
+        block == BlockType::TallGrass || block == BlockType::Fern ||
+        block == BlockType::Vine ||
         (isLeaf(block) && block != BlockType::SpruceLeaves &&
          block != BlockType::BirchLeaves);
     if (!biomeTinted)
@@ -606,6 +611,174 @@ int appendWallPlane(
          base + 2, base + 1, base, base + 3, base + 2, base});
     return 1;
 }
+
+glm::ivec3 faceNormal(BlockFace face)
+{
+    switch (face)
+    {
+        case BlockFace::Back: return {0, 0, -1};
+        case BlockFace::Front: return {0, 0, 1};
+        case BlockFace::Left: return {-1, 0, 0};
+        case BlockFace::Right: return {1, 0, 0};
+        case BlockFace::Bottom: return {0, -1, 0};
+        case BlockFace::Top: return {0, 1, 0};
+    }
+    return {0, 1, 0};
+}
+
+glm::vec3 registryTint(
+    const mc::content::BlockDefinition& definition,
+    const ChunkMeshInput& input,
+    const BiomeColorMap& colourMap,
+    int x,
+    int z,
+    int tintIndex)
+{
+    if (tintIndex < 0 || definition.behaviour.tint == mc::content::BlockTint::None)
+        return {1.0f, 1.0f, 1.0f};
+    if (definition.behaviour.tint == mc::content::BlockTint::SpruceFoliage)
+        return {0x61 / 255.0f, 0x99 / 255.0f, 0x61 / 255.0f};
+    if (definition.behaviour.tint == mc::content::BlockTint::BirchFoliage)
+        return {0x80 / 255.0f, 0xA7 / 255.0f, 0x55 / 255.0f};
+
+    glm::vec3 colour(0.0f);
+    for (int offsetX = -1; offsetX <= 1; ++offsetX)
+    {
+        for (int offsetZ = -1; offsetZ <= 1; ++offsetZ)
+        {
+            const int sampleX = x + offsetX;
+            const int sampleZ = z + offsetZ;
+            const float temperature = input.snapshot->getTemperature(sampleX, sampleZ);
+            const float humidity = input.snapshot->getHumidity(sampleX, sampleZ);
+            const BiomeId biome = input.snapshot->getBiome(sampleX, sampleZ);
+            const int worldX = input.snapshot->getWorldOriginX() + sampleX;
+            const int worldZ = input.snapshot->getWorldOriginZ() + sampleZ;
+            colour += definition.behaviour.tint == mc::content::BlockTint::Grass
+                ? colourMap.getGrassColor(temperature, humidity, biome, worldX, worldZ)
+                : colourMap.getFoliageColor(temperature, humidity, biome, worldX, worldZ);
+        }
+    }
+    return colour / 9.0f;
+}
+
+int appendBakedModel(
+    ChunkMeshData& output,
+    const ChunkMeshInput& input,
+    const BiomeColorMap& colourMap,
+    int x,
+    int y,
+    int z,
+    mc::content::BlockState state,
+    const mc::content::BlockDefinition& definition,
+    const mc::client::BakedModel& model)
+{
+    std::vector<ChunkVertex>* vertices = &output.opaqueVertices;
+    std::vector<std::uint32_t>* indices = &output.opaqueIndices;
+    const bool leaf = definition.behaviour.traits.leaf;
+    if (leaf)
+    {
+        if (input.fastLeaves)
+        {
+            vertices = &output.fastLeafVertices;
+            indices = &output.fastLeafIndices;
+        }
+        else
+        {
+            vertices = &output.fancyLeafVertices;
+            indices = &output.fancyLeafIndices;
+        }
+    }
+    else if (definition.renderLayer == mc::content::RenderLayer::Cutout ||
+             definition.renderLayer == mc::content::RenderLayer::CutoutMipped)
+    {
+        vertices = &output.cutoutVertices;
+        indices = &output.cutoutIndices;
+    }
+    else if (definition.renderLayer == mc::content::RenderLayer::Translucent)
+    {
+        vertices = &output.waterVertices;
+        indices = &output.waterIndices;
+    }
+
+    const glm::vec3 worldOrigin(
+        static_cast<float>(input.snapshot->getWorldOriginX() + x),
+        static_cast<float>(y),
+        static_cast<float>(input.snapshot->getWorldOriginZ() + z)
+    );
+    int faceCount = 0;
+    for (const mc::client::BakedQuad& quad : model.quads)
+    {
+        const glm::ivec3 normal = faceNormal(quad.face);
+        if (quad.cullFace)
+        {
+            const glm::ivec3 cullNormal = faceNormal(*quad.cullFace);
+            const mc::content::BlockState neighbour = ChunkMeshing::sampleState(
+                input, x + cullNormal.x, y + cullNormal.y, z + cullNormal.z
+            );
+            if (leaf)
+            {
+                const bool neighbourLeaf = [&]()
+                {
+                    const mc::content::ContentCatalog* catalog =
+                        mc::content::ContentCatalog::active();
+                    const mc::content::BlockDefinition* neighbourDefinition =
+                        catalog == nullptr ? nullptr : catalog->block(neighbour);
+                    return neighbourDefinition != nullptr &&
+                           neighbourDefinition->behaviour.traits.leaf;
+                }();
+                if ((input.fastLeaves && neighbourLeaf) ||
+                    (!neighbourLeaf && ChunkMeshing::occludesNeighbourFace(neighbour)))
+                    continue;
+            }
+            else if (!ChunkMeshing::shouldRenderFace(state, neighbour))
+            {
+                continue;
+            }
+        }
+
+        const AtlasUV* texture = TextureAtlas::getTextureUV(quad.texture);
+        if (texture == nullptr)
+            continue;
+        const glm::vec3 tint = registryTint(
+            definition, input, colourMap, x, z, quad.tintIndex
+        );
+        const std::uint32_t base = static_cast<std::uint32_t>(vertices->size());
+        std::array<float, 4> brightness{};
+        for (std::size_t vertex = 0; vertex < quad.positions.size(); ++vertex)
+        {
+            brightness[vertex] = quad.shade
+                ? vertexBrightness(input, x, y, z, normal, quad.positions[vertex])
+                : ChunkMeshing::classicBrightness(
+                    ChunkMeshing::sampleLight(input, x + normal.x, y + normal.y, z + normal.z)
+                  );
+            const glm::vec3 position = quad.positions[vertex] + worldOrigin;
+            const float u = texture->minU +
+                (texture->maxU - texture->minU) *
+                (quad.textureCoordinates[vertex].x / 16.0f);
+            const float v = texture->minV +
+                (texture->maxV - texture->minV) *
+                (quad.textureCoordinates[vertex].y / 16.0f);
+            vertices->push_back({
+                position.x, position.y, position.z,
+                u, v,
+                tint.r * brightness[vertex],
+                tint.g * brightness[vertex],
+                tint.b * brightness[vertex],
+                0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                0.0f, leaf ? 1.0f : 0.0f,
+                materialTextureAttribute(MaterialTexture::Atlas)
+            });
+        }
+        if (brightness[0] + brightness[2] > brightness[1] + brightness[3])
+            indices->insert(indices->end(),
+                {base, base + 1, base + 3, base + 1, base + 2, base + 3});
+        else
+            indices->insert(indices->end(),
+                {base, base + 1, base + 2, base, base + 2, base + 3});
+        ++faceCount;
+    }
+    return faceCount;
+}
 }
 
 int appendBlockMesh(
@@ -617,6 +790,26 @@ int appendBlockMesh(
     int z,
     mc::content::BlockState state)
 {
+    state = ChunkMeshing::actualState(input, x, y, z, state);
+    if (state.blockRuntimeId() >
+        static_cast<mc::core::RuntimeId>(BlockType::Cobweb))
+    {
+        const mc::content::ContentCatalog* catalog =
+            mc::content::ContentCatalog::active();
+        const mc::content::BlockDefinition* definition =
+            catalog == nullptr ? nullptr : catalog->block(state);
+        const int worldX = input.snapshot->getWorldOriginX() + x;
+        const int worldZ = input.snapshot->getWorldOriginZ() + z;
+        const mc::client::BakedModel* model =
+            TextureAtlas::getBakedBlockModel(
+                state, blockModelSeed(worldX, y, worldZ)
+            );
+        if (definition != nullptr && model != nullptr)
+            return appendBakedModel(
+                output, input, colourMap, x, y, z, state, *definition, *model
+            );
+        return 0;
+    }
     const BlockType block = state.block();
     const BlockShapeDefinition& shape = getBlockShape(block);
     switch (shape.renderShape)

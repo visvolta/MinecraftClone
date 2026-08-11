@@ -3,6 +3,7 @@
 #include "content/ContentCatalog.h"
 
 #include <algorithm>
+#include <array>
 
 namespace
 {
@@ -55,6 +56,53 @@ constexpr ItemProperties Charcoal{
 constexpr ItemProperties Brick{
     "Brick", 6, 1, 64, 0, {}
 };
+constexpr ItemProperties StringItem{"String", -1, -1, 64, 0, {}};
+constexpr ItemProperties GlowstoneDustItem{"Glowstone Dust", -1, -1, 64, 0, {}};
+constexpr ItemProperties SnowballItem{"Snowball", -1, -1, 16, 0, {}};
+constexpr ItemProperties WheatItemProperties{"Wheat", -1, -1, 64, 0, {}};
+constexpr ItemProperties BeetrootItemProperties{"Beetroot", -1, -1, 64, 0, {}, 1, 0.6f};
+constexpr ItemProperties BeetrootSeedsProperties{"Beetroot Seeds", -1, -1, 64, 0, {}};
+constexpr ItemProperties MelonSliceProperties{"Melon", -1, -1, 64, 0, {}, 2, 0.3f};
+constexpr ItemProperties CocoaBeansProperties{"Cocoa Beans", -1, -1, 64, 0, {}};
+constexpr ItemProperties NetherBrickProperties{"Nether Brick", -1, -1, 64, 0, {}};
+constexpr ItemProperties BookProperties{"Book", -1, -1, 64, 0, {}};
+constexpr ItemProperties JungleSaplingProperties{"Jungle Sapling", -1, -1, 64, 0, {}};
+constexpr ItemProperties AcaciaSaplingProperties{"Acacia Sapling", -1, -1, 64, 0, {}};
+constexpr ItemProperties DarkOakSaplingProperties{"Dark Oak Sapling", -1, -1, 64, 0, {}};
+
+constexpr std::array<ItemProperties, 31> MobDropProperties{{
+    {"Arrow", -1, -1, 64, 0, {}},
+    {"Raw Beef", -1, -1, 64, 0, {}, 3, 0.3f},
+    {"Blaze Rod", -1, -1, 64, 0, {}},
+    {"Bone", -1, -1, 64, 0, {}},
+    {"Raw Chicken", -1, -1, 64, 0, {}, 2, 0.3f},
+    {"Dye", -1, -1, 64, 0, {}},
+    {"Emerald", -1, -1, 64, 0, {}},
+    {"Ender Pearl", -1, -1, 16, 0, {}},
+    {"Feather", -1, -1, 64, 0, {}},
+    {"Raw Fish", -1, -1, 64, 0, {}, 2, 0.1f},
+    {"Ghast Tear", -1, -1, 64, 0, {}},
+    {"Glass Bottle", -1, -1, 64, 0, {}},
+    {"Gold Nugget", -1, -1, 64, 0, {}},
+    {"Gunpowder", -1, -1, 64, 0, {}},
+    {"Leather", -1, -1, 64, 0, {}},
+    {"Magma Cream", -1, -1, 64, 0, {}},
+    {"Raw Mutton", -1, -1, 64, 0, {}, 2, 0.3f},
+    {"Nether Star", -1, -1, 64, 0, {}},
+    {"Raw Porkchop", -1, -1, 64, 0, {}, 3, 0.3f},
+    {"Prismarine Crystals", -1, -1, 64, 0, {}},
+    {"Prismarine Shard", -1, -1, 64, 0, {}},
+    {"Raw Rabbit", -1, -1, 64, 0, {}, 3, 0.3f},
+    {"Rabbit's Foot", -1, -1, 64, 0, {}},
+    {"Rabbit Hide", -1, -1, 64, 0, {}},
+    {"Rotten Flesh", -1, -1, 64, 0, {}, 4, 0.1f},
+    {"Shulker Shell", -1, -1, 64, 0, {}},
+    {"Slimeball", -1, -1, 64, 0, {}},
+    {"Spider Eye", -1, -1, 64, 0, {}, 2, 0.8f},
+    {"Sugar", -1, -1, 64, 0, {}},
+    {"Tipped Arrow", -1, -1, 64, 0, {}},
+    {"Totem of Undying", -1, -1, 1, 0, {}}
+}};
 
 constexpr ItemProperties WoodenShovel{
     "Wooden Shovel", 0, 5, 1, 59,
@@ -184,6 +232,13 @@ const ItemProperties& getItemProperties(ItemType item) noexcept
     }
     if (isBlockItem(item))
         return BlockItem;
+    const std::uint16_t itemValue = static_cast<std::uint16_t>(item);
+    const std::uint16_t firstMobDrop =
+        static_cast<std::uint16_t>(ItemType::Arrow);
+    const std::uint16_t lastMobDrop =
+        static_cast<std::uint16_t>(ItemType::TotemOfUndying);
+    if (itemValue >= firstMobDrop && itemValue <= lastMobDrop)
+        return MobDropProperties[itemValue - firstMobDrop];
 
     switch (item)
     {
@@ -232,7 +287,21 @@ const ItemProperties& getItemProperties(ItemType item) noexcept
         case ItemType::DiamondChestplate: return DiamondChestplate;
         case ItemType::DiamondLeggings: return DiamondLeggings;
         case ItemType::DiamondBoots: return DiamondBoots;
+        case ItemType::String: return StringItem;
+        case ItemType::GlowstoneDust: return GlowstoneDustItem;
+        case ItemType::Snowball: return SnowballItem;
+        case ItemType::WheatItem: return WheatItemProperties;
+        case ItemType::BeetrootItem: return BeetrootItemProperties;
+        case ItemType::BeetrootSeeds: return BeetrootSeedsProperties;
+        case ItemType::MelonSlice: return MelonSliceProperties;
+        case ItemType::CocoaBeans: return CocoaBeansProperties;
+        case ItemType::NetherBrickItem: return NetherBrickProperties;
+        case ItemType::Book: return BookProperties;
+        case ItemType::JungleSapling: return JungleSaplingProperties;
+        case ItemType::AcaciaSapling: return AcaciaSaplingProperties;
+        case ItemType::DarkOakSapling: return DarkOakSaplingProperties;
         case ItemType::Empty: return Empty;
+        default: break;
     }
     return Empty;
 }

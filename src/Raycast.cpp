@@ -114,12 +114,12 @@ RaycastHit Raycast::cast(
         const glm::ivec3& position,
         RaycastHit& hit)
     {
-        const BlockType block =
-            world.getBlock(position.x, position.y, position.z);
+        const mc::content::BlockState state =
+            world.getActualBlockState(position.x, position.y, position.z);
         float closestDistance = maxDistance + 1.0f;
         glm::ivec3 closestNormal(0);
         bool found = false;
-        for (const BlockBox& localBox : getBlockShape(block).selectionBoxes)
+        for (const BlockBox& localBox : getBlockShape(state).selectionBoxes)
         {
             float distance = 0.0f;
             glm::ivec3 normal(0);

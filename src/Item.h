@@ -57,7 +57,53 @@ enum class ItemType : std::uint16_t
     DiamondHelmet,
     DiamondChestplate,
     DiamondLeggings,
-    DiamondBoots
+    DiamondBoots,
+
+    String,
+    GlowstoneDust,
+    Snowball,
+    WheatItem,
+    BeetrootItem,
+    BeetrootSeeds,
+    MelonSlice,
+    CocoaBeans,
+    NetherBrickItem,
+    Book,
+    JungleSapling,
+    AcaciaSapling,
+    DarkOakSapling,
+
+    Arrow,
+    RawBeef,
+    BlazeRod,
+    Bone,
+    RawChicken,
+    Dye,
+    Emerald,
+    EnderPearl,
+    Feather,
+    RawFish,
+    GhastTear,
+    GlassBottle,
+    GoldNugget,
+    Gunpowder,
+    Leather,
+    MagmaCream,
+    RawMutton,
+    NetherStar,
+    RawPorkchop,
+    PrismarineCrystals,
+    PrismarineShard,
+    RawRabbit,
+    RabbitFoot,
+    RabbitHide,
+    RottenFlesh,
+    ShulkerShell,
+    SlimeBall,
+    SpiderEye,
+    Sugar,
+    TippedArrow,
+    TotemOfUndying
 };
 
 enum class ArmorSlot : std::uint8_t
@@ -94,7 +140,7 @@ struct ItemProperties
 {
     const std::uint16_t value = static_cast<std::uint16_t>(item);
     return value > 0 &&
-           value <= static_cast<std::uint16_t>(BlockType::TNT);
+           value <= static_cast<std::uint16_t>(BlockType::Cobweb);
 }
 
 [[nodiscard]] constexpr BlockType blockFromItem(ItemType item) noexcept

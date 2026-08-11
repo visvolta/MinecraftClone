@@ -60,7 +60,7 @@ float cornerHeight(
             continue;
         }
 
-        const std::uint8_t level = state.properties();
+        const std::uint8_t level = static_cast<std::uint8_t>(state.properties());
         if (FluidState::isFalling(level) ||
             level == FluidState::SourceLevel)
         {

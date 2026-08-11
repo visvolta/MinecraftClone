@@ -7,8 +7,10 @@
 #include "worldgen/JavaRandom.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
+#include <string>
 
 namespace mc::entity
 {
@@ -104,7 +106,7 @@ bool specialSpawnRules(
     int x,
     int y,
     int z,
-    std::mt19937& random)
+    JavaRandom& random)
 {
     const std::string& name = type.path();
     const BlockType ground = world.getBlock(x,y-1,z);
@@ -135,7 +137,7 @@ bool specialSpawnRules(
     {
         if (y >= 63)
             return false;
-        const int limit = std::uniform_int_distribution<int>(0,6)(random);
+        const int limit = random.nextInt(7);
         return world.getBlockLightLevel(x,y,z) <= limit;
     }
     if (name == "squid")
@@ -147,7 +149,7 @@ bool specialSpawnRules(
         const BiomeId biome = world.getBiomeAt(x,z);
         if (biome == VanillaBiomes::Swampland && y > 50 && y < 70 &&
             world.getBlockLightLevel(x,y,z) <= 7)
-            return std::uniform_int_distribution<int>(0,1)(random) == 0;
+            return random.nextInt(2) == 0;
         if (y >= 40)
             return false;
         const std::int64_t chunkX = x >= 0 ? x/16 : (x-15)/16;
@@ -167,6 +169,7 @@ MobEntityManager::MobEntityManager(
     const gameplay::GameplayRegistries& registries)
     : registries_(&registries)
 {
+    entities_.reserve(128);
 }
 
 bool MobEntityManager::attackNearest(
@@ -175,45 +178,91 @@ bool MobEntityManager::attackNearest(
     float maximumDistance,
     float damage)
 {
-    if (maximumDistance <= 0.0f || glm::dot(direction, direction) < 0.000001f)
-        return false;
-    const glm::vec3 rayDirection = glm::normalize(direction);
-    MobEntity* nearest = nullptr;
-    float nearestDistance = maximumDistance;
-    for (MobEntity& entity : entities_)
-    {
-        if (entity.dead())
-            continue;
-        const float halfWidth = entity.definition().width * 0.5f;
-        const glm::vec3 minimum = entity.position() +
-            glm::vec3(-halfWidth, 0.0f, -halfWidth);
-        const glm::vec3 maximum = entity.position() + glm::vec3(
-            halfWidth, entity.definition().height, halfWidth
-        );
-        float distance = 0.0f;
-        if (rayBox(origin, rayDirection, minimum, maximum,
-                   nearestDistance, distance))
-        {
-            nearest = &entity;
-            nearestDistance = distance;
-        }
-    }
+    MobEntity* nearest = nearestAlongRay(
+        origin, direction, maximumDistance
+    );
     if (nearest == nullptr)
         return false;
     nearest->damage(std::max(0.0f, damage), true);
     return true;
 }
 
+bool MobEntityManager::interactNearest(
+    const glm::vec3& origin,
+    const glm::vec3& direction,
+    float maximumDistance,
+    Player& player,
+    ItemStack& heldStack)
+{
+    MobEntity* nearest = nearestAlongRay(
+        origin, direction, maximumDistance
+    );
+    if (nearest == nullptr)
+        return false;
+    const bool wasSheared = nearest->sheared_;
+    const bool result = nearest->interact(player, heldStack, random_);
+    if (result && nearest->type_.path() == "sheep" && !wasSheared &&
+        nearest->sheared_)
+    {
+        constexpr std::array<BlockType, 16> wool{{
+            BlockType::WhiteWool, BlockType::OrangeWool,
+            BlockType::MagentaWool, BlockType::LightBlueWool,
+            BlockType::YellowWool, BlockType::LimeWool,
+            BlockType::PinkWool, BlockType::GrayWool,
+            BlockType::LightGrayWool, BlockType::CyanWool,
+            BlockType::PurpleWool, BlockType::BlueWool,
+            BlockType::BrownWool, BlockType::GreenWool,
+            BlockType::RedWool, BlockType::BlackWool
+        }};
+        const int count = 1 + random_.nextInt(3);
+        for (int drop = 0; drop < count; ++drop)
+            interactionDrops_.push_back({
+                ItemStack(wool[static_cast<std::size_t>(
+                    std::clamp(nearest->variant_, 0, 15)
+                )]),
+                nearest->position_ + glm::vec3(0.0f, 1.0f, 0.0f)
+            });
+    }
+    return result;
+}
+
 void MobEntityManager::tick(
     World& world,
     Player& player,
-    std::uint64_t worldTime)
+    std::uint64_t worldTime,
+    ItemType playerMainHand)
 {
     ++ticks_;
     const std::uint64_t timeOfDay = worldTime % 24000U;
     const bool daytime = timeOfDay < 12000U;
+    std::vector<MobBirthRequest> births;
+    MobTickContext context{
+        world, player, std::span<MobEntity>(entities_), births, random_,
+        playerMainHand, daytime
+    };
     for (MobEntity& entity : entities_)
-        entity.tick(world, player, daytime, random_);
+    {
+        const bool wasLeashed = entity.leashed_;
+        entity.tick(context);
+        if (wasLeashed && !entity.leashed_)
+            interactionDrops_.push_back({
+                ItemStack(ItemType::Lead, 1), entity.position_
+            });
+    }
+    for (MobBirthRequest& birth : births)
+    {
+        const gameplay::MobDefinition* definition =
+            registries_->mobs().find(birth.child.type);
+        if (definition == nullptr || entities_.size() >= 128U)
+            continue;
+        entities_.emplace_back(
+            birth.child.type, *definition, birth.child.position,
+            birth.child.yaw
+        );
+        entities_.back().restorePersistentState(birth.child);
+    }
+    if (!births.empty())
+        rebindEntities();
 
     const glm::vec3 playerPosition = player.getPosition();
     for (const MobEntity& entity : entities_)
@@ -234,9 +283,10 @@ void MobEntityManager::tick(
             return true;
         if (distanceSquared > 32.0f * 32.0f &&
             entity.age() > 600 && entity.age() % 800 == 0)
-            return std::uniform_int_distribution<int>(0, 799)(random_) == 0;
+            return random_.nextInt(800) == 0;
         return false;
     });
+    rebindEntities();
 
     if (ticks_ % 5U == 0U)
     {
@@ -273,12 +323,14 @@ void MobEntityManager::tryNaturalSpawn(
     if (current >= categoryCap(category))
         return;
 
-    std::uniform_real_distribution<float> angle(
+    const auto nextRange = [this](float minimum, float maximum)
+    {
+        return minimum + random_.nextFloat() * (maximum - minimum);
+    };
+    const float direction = nextRange(
         0.0f, std::numbers::pi_v<float> * 2.0f
     );
-    std::uniform_real_distribution<float> radius(24.0f, 96.0f);
-    const float direction = angle(random_);
-    const float distance = radius(random_);
+    const float distance = nextRange(24.0f, 96.0f);
     const int x = static_cast<int>(std::floor(
         player.getPosition().x + std::cos(direction) * distance
     ));
@@ -299,7 +351,7 @@ void MobEntityManager::tryNaturalSpawn(
     if (totalWeight == 0)
         return;
     int selectedWeight =
-        std::uniform_int_distribution<int>(0, totalWeight - 1)(random_);
+        random_.nextInt(totalWeight);
     const BiomeMobSpawn* selected = nullptr;
     for (const BiomeMobSpawn& choice : choices)
     {
@@ -321,7 +373,7 @@ void MobEntityManager::tryNaturalSpawn(
     int y = surfaceY;
     if (definition->spawnPlacement == gameplay::SpawnPlacement::InWater)
     {
-        y = std::uniform_int_distribution<int>(46,62)(random_);
+        y = 46 + random_.nextInt(17);
         while (y > 45 && world.getBlock(x,y,z)!=BlockType::Water)
             --y;
         if (world.getBlock(x, y, z) != BlockType::Water)
@@ -329,9 +381,7 @@ void MobEntityManager::tryNaturalSpawn(
     }
     else if (definition->category != gameplay::MobCategory::Creature)
     {
-        y = std::uniform_int_distribution<int>(
-            1,std::max(1,std::min(255,surfaceY))
-        )(random_);
+        y = 1 + random_.nextInt(std::max(1, std::min(255, surfaceY)));
     }
     else if (world.getBlock(x, y - 1, z) == BlockType::Air)
     {
@@ -353,23 +403,22 @@ void MobEntityManager::tryNaturalSpawn(
         return;
     }
 
-    const int groupSize = std::uniform_int_distribution<int>(
-        selected->minimumGroup, selected->maximumGroup
-    )(random_);
-    std::uniform_int_distribution<int> offset(-4, 4);
-    std::uniform_int_distribution<int> verticalOffset(-1,1);
+    const int minimumGroup = std::max(1, selected->minimumGroup);
+    const int maximumGroup = std::max(minimumGroup, selected->maximumGroup);
+    const int groupSize = minimumGroup +
+        random_.nextInt(maximumGroup - minimumGroup + 1);
     for (int member = 0;
          member < groupSize && entities_.size() < 100U;
          ++member)
     {
-        const int spawnX = x + offset(random_);
-        const int spawnZ = z + offset(random_);
+        const int spawnX = x + random_.nextInt(9) - 4;
+        const int spawnZ = z + random_.nextInt(9) - 4;
         const int spawnY = definition->spawnPlacement ==
                 gameplay::SpawnPlacement::InWater
             ? y
             : definition->category == gameplay::MobCategory::Creature
                 ? world.getHighestSolidBlockY(spawnX,spawnZ)+1
-                : y+verticalOffset(random_);
+                : y + random_.nextInt(3) - 1;
         const glm::vec3 spawnPosition(
             spawnX + 0.5f, static_cast<float>(spawnY), spawnZ + 0.5f
         );
@@ -383,15 +432,122 @@ void MobEntityManager::tryNaturalSpawn(
             selected->entity,
             *definition,
             spawnPosition,
-            angle(random_)
+            nextRange(0.0f, std::numbers::pi_v<float> * 2.0f)
         );
+        MobEntity& spawned = entities_.back();
+        if (selected->entity.path() == "sheep")
+        {
+            const int roll = random_.nextInt(100);
+            spawned.variant_ = roll < 5 ? 15 : roll < 10 ? 7
+                : roll < 15 ? 8 : roll < 18 ? 12
+                : random_.nextInt(500) == 0 ? 6 : 0;
+        }
+        else if (selected->entity.path() == "horse")
+        {
+            spawned.variant_ = random_.nextInt(7) + random_.nextInt(5) * 7;
+            if (random_.nextInt(5) == 0)
+                spawned.growingAge_ = -24000;
+        }
+        else if (selected->entity.path() == "llama")
+        {
+            spawned.variant_ = random_.nextInt(4);
+        }
+        else if (selected->entity.path() == "parrot")
+        {
+            spawned.variant_ = random_.nextInt(5);
+        }
+        else if (selected->entity.path() == "rabbit")
+        {
+            const BiomeDefinition* rabbitBiome = BiomeRegistry::active().find(
+                world.getBiomeAt(spawnX, spawnZ)
+            );
+            const int roll = random_.nextInt(100);
+            if (rabbitBiome != nullptr && rabbitBiome->snowy)
+                spawned.variant_ = roll < 80 ? 1 : 3;
+            else if (rabbitBiome != nullptr &&
+                     rabbitBiome->name.path().find("desert") !=
+                         std::string::npos)
+                spawned.variant_ = 4;
+            else
+                spawned.variant_ = roll < 50 ? 0 : roll < 90 ? 5 : 2;
+            if (member > 0)
+                spawned.growingAge_ = -24000;
+        }
+        spawned.updateVariantPresentation();
+        rebindEntities();
     }
+}
+
+MobEntity* MobEntityManager::nearestAlongRay(
+    const glm::vec3& origin,
+    const glm::vec3& direction,
+    float maximumDistance)
+{
+    if (maximumDistance <= 0.0f || glm::dot(direction, direction) < 0.000001f)
+        return nullptr;
+    const glm::vec3 rayDirection = glm::normalize(direction);
+    MobEntity* nearest = nullptr;
+    float nearestDistance = maximumDistance;
+    for (MobEntity& entity : entities_)
+    {
+        if (entity.dead())
+            continue;
+        const float halfWidth = entity.collisionWidth() * 0.5f;
+        const glm::vec3 minimum = entity.position() +
+            glm::vec3(-halfWidth, 0.0f, -halfWidth);
+        const glm::vec3 maximum = entity.position() + glm::vec3(
+            halfWidth, entity.collisionHeight(), halfWidth
+        );
+        float distance = 0.0f;
+        if (rayBox(origin, rayDirection, minimum, maximum,
+                   nearestDistance, distance))
+        {
+            nearest = &entity;
+            nearestDistance = distance;
+        }
+    }
+    return nearest;
+}
+
+std::vector<MobPersistentState> MobEntityManager::persistentStates() const
+{
+    std::vector<MobPersistentState> result;
+    result.reserve(entities_.size());
+    for (const MobEntity& entity : entities_)
+        if (!entity.dead())
+            result.push_back(entity.persistentState());
+    return result;
+}
+
+void MobEntityManager::restorePersistentStates(
+    const std::vector<MobPersistentState>& states)
+{
+    entities_.clear();
+    for (const MobPersistentState& state : states)
+    {
+        const gameplay::MobDefinition* definition =
+            registries_->mobs().find(state.type);
+        if (definition == nullptr || entities_.size() >= 128U)
+            continue;
+        entities_.emplace_back(
+            state.type, *definition, state.position, state.yaw
+        );
+        entities_.back().restorePersistentState(state);
+    }
+    rebindEntities();
+}
+
+void MobEntityManager::rebindEntities() noexcept
+{
+    for (MobEntity& entity : entities_)
+        entity.rebindRuntime();
 }
 
 void MobEntityManager::clear() noexcept
 {
     entities_.clear();
     deathEvents_.clear();
+    interactionDrops_.clear();
 }
 const std::vector<MobEntity>& MobEntityManager::entities() const noexcept
 {
@@ -402,6 +558,12 @@ std::vector<MobDeath> MobEntityManager::takeDeaths()
 {
     std::vector<MobDeath> result;
     result.swap(deathEvents_);
+    return result;
+}
+std::vector<MobInteractionDrop> MobEntityManager::takeInteractionDrops()
+{
+    std::vector<MobInteractionDrop> result;
+    result.swap(interactionDrops_);
     return result;
 }
 }

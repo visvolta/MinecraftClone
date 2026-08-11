@@ -104,6 +104,25 @@ constexpr std::array<ItemProperties, 31> MobDropProperties{{
     {"Totem of Undying", -1, -1, 1, 0, {}}
 }};
 
+constexpr std::array<ItemProperties, 16> InteractionItemProperties{{
+    {"Cookie", -1, -1, 64, 0, {}, 2, 0.1f},
+    {"Golden Apple", -1, -1, 64, 0, {}, 4, 1.2f},
+    {"Golden Carrot", -1, -1, 64, 0, {}, 6, 1.2f},
+    {"Melon Seeds", -1, -1, 64, 0, {}},
+    {"Pumpkin Seeds", -1, -1, 64, 0, {}},
+    {"Saddle", -1, -1, 1, 0, {}},
+    {"Shears", -1, -1, 1, 238, {}},
+    {"Cooked Chicken", -1, -1, 64, 0, {}, 6, 0.6f},
+    {"Cooked Fish", -1, -1, 64, 0, {}, 5, 0.6f},
+    {"Cooked Mutton", -1, -1, 64, 0, {}, 6, 0.8f},
+    {"Cooked Porkchop", -1, -1, 64, 0, {}, 8, 0.8f},
+    {"Cooked Rabbit", -1, -1, 64, 0, {}, 5, 0.6f},
+    {"Iron Horse Armor", -1, -1, 1, 0, {}},
+    {"Golden Horse Armor", -1, -1, 1, 0, {}},
+    {"Diamond Horse Armor", -1, -1, 1, 0, {}},
+    {"Lead", -1, -1, 64, 0, {}}
+}};
+
 constexpr ItemProperties WoodenShovel{
     "Wooden Shovel", 0, 5, 1, 59,
     {ToolType::Shovel, ToolMaterial::Wood, 2.0f, 0}
@@ -239,6 +258,12 @@ const ItemProperties& getItemProperties(ItemType item) noexcept
         static_cast<std::uint16_t>(ItemType::TotemOfUndying);
     if (itemValue >= firstMobDrop && itemValue <= lastMobDrop)
         return MobDropProperties[itemValue - firstMobDrop];
+    const std::uint16_t firstInteractionItem =
+        static_cast<std::uint16_t>(ItemType::Cookie);
+    const std::uint16_t lastInteractionItem =
+        static_cast<std::uint16_t>(ItemType::Lead);
+    if (itemValue >= firstInteractionItem && itemValue <= lastInteractionItem)
+        return InteractionItemProperties[itemValue - firstInteractionItem];
 
     switch (item)
     {

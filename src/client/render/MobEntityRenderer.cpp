@@ -267,7 +267,7 @@ void MobEntityRenderer::draw(
             {0,0,1}
         );
         transform=glm::scale(
-            transform,glm::vec3(entity.definition().renderScale)
+            transform,glm::vec3(entity.renderScale())
         );
         shader_->setMat4("model",transform);
         const glm::vec3 hurtTint = glm::mix(
@@ -279,7 +279,7 @@ void MobEntityRenderer::draw(
         glDrawArrays(
             GL_TRIANGLES,0,static_cast<GLsizei>(vertices.size())
         );
-        if(hasOverlay(entity.overlayTexture()))
+        if(hasOverlay(entity.overlayTexture()) && !entity.isSheared())
         {
             const float scale=overlayScale(entity.type());
             glm::mat4 overlay=glm::scale(

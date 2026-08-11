@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Item.h"
 #include "core/Registry.h"
 
 #include <cstdint>
@@ -92,6 +93,78 @@ enum class MobAttackKind : std::uint8_t
     CreeperExplosion
 };
 
+enum class MobGoalKind : std::uint8_t
+{
+    Swim,
+    Panic,
+    Mate,
+    Tempt,
+    FollowParent,
+    WanderAvoidWater,
+    WatchPlayer,
+    LookIdle,
+    EatGrass,
+    AvoidPlayer,
+    Sit,
+    FollowOwner,
+    Beg,
+    LeapAtTarget,
+    MeleeAttack,
+    NearestPlayerTarget,
+    HurtByTarget,
+    RestrictSun,
+    FleeSun,
+    CreeperSwell,
+    RangedAttack,
+    LandOnOwnerShoulder,
+    RunAroundLikeCrazy,
+    FollowCaravan
+};
+
+struct MobGoalDefinition
+{
+    MobGoalKind kind = MobGoalKind::WanderAvoidWater;
+    int priority = 0;
+    std::uint8_t mutexBits = 0;
+    double speed = 1.0;
+    float range = 0.0f;
+    float stopRange = 0.0f;
+    float chance = 0.0f;
+    std::vector<ItemType> items;
+};
+
+enum class AnimalKind : std::uint8_t
+{
+    None,
+    Cow,
+    Pig,
+    Sheep,
+    Chicken,
+    Rabbit,
+    Horse,
+    Donkey,
+    Mule,
+    Mooshroom,
+    Llama,
+    Wolf,
+    Ocelot,
+    PolarBear
+};
+
+enum class TameableKind : std::uint8_t
+{
+    None,
+    Wolf,
+    Ocelot,
+    Parrot,
+    Horse,
+    Donkey,
+    Mule,
+    Llama,
+    SkeletonHorse,
+    ZombieHorse
+};
+
 enum class MobAiGoal : std::uint64_t
 {
     None = 0,
@@ -174,6 +247,17 @@ struct MobDefinition
     float renderScale = 1.0f;
     std::vector<core::ResourceLocation> variantTextures;
     std::vector<core::ResourceLocation> variantOverlayTextures;
+    float stepHeight = 0.6f;
+    int maximumFallHeight = 3;
+    bool ageable = false;
+    bool breedable = false;
+    AnimalKind animalKind = AnimalKind::None;
+    TameableKind tameableKind = TameableKind::None;
+    std::vector<ItemType> breedingItems;
+    std::vector<ItemType> tamingItems;
+    std::vector<MobGoalDefinition> goalTasks;
+    std::vector<MobGoalDefinition> targetGoalTasks;
+    int maximumTemper = 0;
 };
 
 struct StructureDefinition

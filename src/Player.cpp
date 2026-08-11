@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cmath>
 
+#ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
+#endif
 #include <GLFW/glfw3.h>
 #include <glm/geometric.hpp>
 
@@ -241,6 +243,11 @@ bool Player::isBlocking() const noexcept
     return blocking_;
 }
 
+const mc::entity::EntityUuid& Player::uuid() const noexcept
+{
+    return uuid_;
+}
+
 void Player::damage(int amount, const glm::vec3& sourcePosition) noexcept
 {
     glm::vec3 towardSource = sourcePosition - position_;
@@ -279,6 +286,7 @@ void Player::setNoClip(bool enabled) noexcept
     collidedHorizontally_ = false;
     sprintToggleTicks_ = 0;
     blocking_ = false;
+    riding_ = false;
     previousFovMultiplier_ = 1.0f;
     fovMultiplier_ = 1.0f;
     previousPosition_ = position_;
@@ -324,15 +332,46 @@ void Player::respawn(const glm::vec3& feetPosition) noexcept
     collidedHorizontally_ = false;
     sprintToggleTicks_ = 0;
     blocking_ = false;
+    riding_ = false;
     previousFovMultiplier_ = 1.0f;
     fovMultiplier_ = 1.0f;
+}
+
+void Player::setRidingPosition(const glm::vec3& feetPosition) noexcept
+{
+    previousPosition_ = position_;
+    position_ = feetPosition;
+    renderPosition_ = position_;
+    verticalVelocity_ = 0.0f;
+    liquidHorizontalVelocity_ = {0.0f, 0.0f};
+    grounded_ = false;
+    fallDistance_ = 0.0f;
+}
+
+void Player::startRiding() noexcept
+{
+    riding_ = true;
+    sprinting_ = false;
+    verticalVelocity_ = 0.0f;
+    liquidHorizontalVelocity_ = {0.0f, 0.0f};
+    fallDistance_ = 0.0f;
+}
+
+void Player::stopRiding() noexcept
+{
+    riding_ = false;
+}
+
+bool Player::isRiding() const noexcept
+{
+    return riding_;
 }
 
 PlayerPersistentState Player::persistentState() const noexcept
 {
     return {
         position_, health_, previousHealth_, air_, fireTicks_, ticksExisted_,
-        survival_.persistentState()
+        uuid_, survival_.persistentState()
     };
 }
 
@@ -347,6 +386,8 @@ void Player::restorePersistentState(
     air_ = std::clamp(state.air, 0, MAXIMUM_AIR);
     fireTicks_ = std::max(0, state.fireTicks);
     ticksExisted_ = std::max(0, state.ticksExisted);
+    if (!state.uuid.empty())
+        uuid_ = state.uuid;
     survival_.restorePersistentState(state.survival);
     verticalVelocity_ = 0.0f;
     liquidHorizontalVelocity_ = {0.0f, 0.0f};
@@ -370,6 +411,7 @@ void Player::restorePersistentState(
     collidedHorizontally_ = false;
     sprintToggleTicks_ = 0;
     blocking_ = false;
+    riding_ = false;
     previousFovMultiplier_ = 1.0f;
     fovMultiplier_ = 1.0f;
 }
@@ -424,6 +466,17 @@ void Player::simulateTick(GLFWwindow* window, const World& world, const Camera& 
     right.y = 0.0f;
     if (glm::dot(right, right) > 0.000001f)
         right = glm::normalize(right);
+
+    if (riding_)
+    {
+        crouching_ = isAlive() &&
+            (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+             glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
+        sprinting_ = false;
+        survival_.tick(true, true, health_, MAXIMUM_HEALTH);
+        updateFovMultiplier();
+        return;
+    }
 
     glm::vec3 wishDirection(0.0f);
     float forwardInput = 0.0f;

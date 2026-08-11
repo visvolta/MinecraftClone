@@ -126,6 +126,7 @@ int main()
     source.seed = 987654;
     source.worldTime = 12'345;
     source.spawnPosition = glm::ivec3(84, 71, -36);
+    source.player.uuid = {0x1234U, 0x5678U};
     source.player.survival.foodLevel = 13;
     source.player.survival.saturation = 2.5f;
     source.player.survival.experienceLevel = 7;
@@ -155,6 +156,18 @@ int main()
         {BlockType::IronOre, 4};
     sourceEntities.getOrCreateSpawner({6, 22, 7}).setMobId(1);
     source.blockEntities = sourceEntities.snapshot();
+    mc::entity::MobPersistentState wolf;
+    wolf.type = mc::core::ResourceLocation("minecraft:wolf");
+    wolf.uuid = {11U, 22U};
+    wolf.ownerUuid = source.player.uuid;
+    wolf.position = {82.5f, 71.0f, -34.5f};
+    wolf.health = 17.0f;
+    wolf.ticksExisted = 123;
+    wolf.growingAge = -12000;
+    wolf.variant = 2;
+    wolf.tamed = true;
+    wolf.sitting = true;
+    source.mobs.push_back(wolf);
 
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
@@ -170,7 +183,7 @@ int main()
     raw.seekg(8);
     std::uint32_t version = 0;
     raw.read(reinterpret_cast<char*>(&version), sizeof(version));
-    assert(version == 6);
+    assert(version == 7);
     raw.close();
 
     const auto loaded = SaveGame::load(path, message, bootstrap.content());
@@ -181,6 +194,7 @@ int main()
     assert(loaded->spawnPosition == source.spawnPosition);
     assert(loaded->player.survival.foodLevel == 13);
     assert(loaded->player.survival.experienceLevel == 7);
+    assert(loaded->player.uuid == source.player.uuid);
     assert(loaded->inventory[Inventory::OFFHAND_SLOT].item == ItemType::Shield);
     assert(loaded->inventory[0].item == ItemType::RawBeef);
     assert(loaded->inventory[0].count == 17);
@@ -198,6 +212,12 @@ int main()
     assert(loadedEntities.getFurnace({2, 61, 3})->getSlot(
         FurnaceBlockEntity::Input).count == 4);
     assert(loadedEntities.getSpawner({6, 22, 7})->mobId() == 1);
+    assert(loaded->mobs.size() == 1U);
+    assert(loaded->mobs.front().type.toString() == "minecraft:wolf");
+    assert(loaded->mobs.front().ownerUuid == source.player.uuid);
+    assert(loaded->mobs.front().growingAge == -12000);
+    assert(loaded->mobs.front().tamed);
+    assert(loaded->mobs.front().sitting);
 
     // Version 5 includes the persisted spawn but predates generator
     // versioning. It must remain readable and opt into the legacy generator

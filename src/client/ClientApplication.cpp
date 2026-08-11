@@ -230,6 +230,7 @@ namespace
         const World& world,
         const Player& player,
         const Inventory& inventory,
+        const mc::entity::MobEntityManager& mobEntities,
         const Atmosphere& atmosphere,
         const glm::vec3& spawnFeetPosition)
     {
@@ -248,6 +249,7 @@ namespace
         data.modifiedChunks = world.getModifiedChunkSnapshots();
         data.blockEntities = world.getBlockEntitySnapshots();
         data.fluidTicks = world.getScheduledFluidTickSnapshots();
+        data.mobs = mobEntities.persistentStates();
         return data;
     }
 
@@ -584,6 +586,8 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         Player player(restoreSavedPlayer ? initialLoadPosition : spawnFeetPosition);
         if (restoreSavedPlayer)
             player.restorePersistentState(loadedSave->player);
+        if (loadedSave)
+            mobEntities.restorePersistentStates(loadedSave->mobs);
         camera.setPosition(player.getEyePosition());
 
         std::cout << "Chunks: " << world->getLoadedChunkCount()
@@ -640,8 +644,12 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     inventory
                 );
                 mobEntities.tick(
-                    *world, player, atmosphere.getWorldTime()
+                    *world, player, atmosphere.getWorldTime(),
+                    inventory.getSelectedItem()
                 );
+                for (const mc::entity::MobInteractionDrop& drop :
+                     mobEntities.takeInteractionDrops())
+                    itemEntities.spawnMobDrop(drop.stack, drop.position);
                 for (const mc::entity::MobDeath& death :
                      mobEntities.takeDeaths())
                 {
@@ -665,7 +673,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 if (gameTick % 600 == 0)
                 {
                     const GameSaveData data = captureSaveData(
-                        *world, player, inventory, atmosphere,
+                        *world, player, inventory, mobEntities, atmosphere,
                         spawnFeetPosition
                     );
                     if (!SaveGame::save(
@@ -909,13 +917,22 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             );
 
             bool consumedFood = false;
+            bool interactedEntity = false;
             if (rightMousePressed && !rightMouseWasPressed)
             {
                 ItemStack& held = inventory.getSlot(
                     inventory.getSelectedHotbarSlot()
                 );
+                interactedEntity = mobEntities.interactNearest(
+                    camera.getPosition(), camera.getForward(),
+                    targetedBlock.hit ? targetedBlock.distance : blockReach,
+                    player, held
+                );
+                for (const mc::entity::MobInteractionDrop& drop :
+                     mobEntities.takeInteractionDrops())
+                    itemEntities.spawnMobDrop(drop.stack, drop.position);
                 const ItemProperties& item = getItemProperties(held.item);
-                if (!held.empty() && item.foodPoints > 0 &&
+                if (!interactedEntity && !held.empty() && item.foodPoints > 0 &&
                     player.survival().foodLevel() < 20)
                 {
                     player.eat(item.foodPoints, item.saturationModifier);
@@ -926,7 +943,8 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 }
             }
 
-            if (!consumedFood && !usingShield && rightMousePressed &&
+            if (!interactedEntity && !consumedFood && !usingShield &&
+                rightMousePressed &&
                 !rightMouseWasPressed && targetedBlock.hit)
             {
                 const BlockType targetedType = world->getBlockState(
@@ -1426,6 +1444,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     *world,
                     player,
                     inventory,
+                    mobEntities,
                     atmosphere,
                     spawnFeetPosition
                 );
@@ -1451,7 +1470,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         }
 
         const GameSaveData finalSave = captureSaveData(
-            *world, player, inventory, atmosphere,
+            *world, player, inventory, mobEntities, atmosphere,
             spawnFeetPosition
         );
         if (!SaveGame::save(

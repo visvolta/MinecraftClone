@@ -254,6 +254,324 @@ void configureVanillaAi(std::string_view name, MobDefinition& definition)
             "parrot/parrot_grey"
         });
 }
+
+MobGoalDefinition task(
+    MobGoalKind kind,
+    int priority,
+    std::uint8_t mutexBits,
+    double speed = 1.0,
+    float range = 0.0f,
+    float stopRange = 0.0f,
+    float chance = 0.0f,
+    std::initializer_list<ItemType> items = {})
+{
+    return {
+        kind, priority, mutexBits, speed, range, stopRange, chance,
+        std::vector<ItemType>(items)
+    };
+}
+
+void configureReleaseEntityData(
+    std::string_view name,
+    MobDefinition& definition)
+{
+    // These task priorities, movement multipliers, distances and item sets are
+    // taken from the 1.12.2 entity constructors and EntityAI* classes.
+    definition.goalTasks.clear();
+    definition.targetGoalTasks.clear();
+
+    if (definition.category == MobCategory::Monster)
+    {
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::MeleeAttack, 2, 3, 1.0,
+                 definition.attackRange),
+            task(MobGoalKind::WanderAvoidWater, 5, 1, 1.0, 10.0f,
+                 0.0f, 1.0f / 120.0f),
+            task(MobGoalKind::WatchPlayer, 6, 2, 1.0, 8.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 7, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+        definition.targetGoalTasks = {
+            task(MobGoalKind::HurtByTarget, 1, 0),
+            task(MobGoalKind::NearestPlayerTarget, 2, 0, 1.0,
+                 definition.followRange)
+        };
+    }
+    else
+    {
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::WanderAvoidWater, 5, 1, 1.0, 10.0f,
+                 0.0f, 1.0f / 120.0f),
+            task(MobGoalKind::WatchPlayer, 6, 2, 1.0, 6.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 7, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+    }
+
+    const auto setAnimal = [&](AnimalKind kind,
+                               std::initializer_list<ItemType> foods)
+    {
+        definition.ageable = true;
+        definition.breedable = foods.size() != 0;
+        definition.animalKind = kind;
+        definition.breedingItems.assign(foods);
+    };
+    const auto commonAnimalTasks = [&](double panicSpeed,
+                                       double mateSpeed,
+                                       double temptSpeed,
+                                       double parentSpeed,
+                                       double wanderSpeed,
+                                       int watchPriority,
+                                       int idlePriority,
+                                       std::initializer_list<ItemType> foods)
+    {
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::Panic, 1, 1, panicSpeed),
+            task(MobGoalKind::Mate, 2, 3, mateSpeed),
+            task(MobGoalKind::Tempt, 3, 3, temptSpeed, 10.0f,
+                 2.5f, 0.0f, foods),
+            task(MobGoalKind::FollowParent, 4, 0, parentSpeed, 8.0f,
+                 3.0f),
+            task(MobGoalKind::WanderAvoidWater, 5, 1, wanderSpeed,
+                 10.0f, 0.0f, 0.001f),
+            task(MobGoalKind::WatchPlayer, watchPriority, 2, 1.0,
+                 6.0f, 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, idlePriority, 3, 1.0,
+                 0.0f, 0.0f, 0.02f)
+        };
+    };
+
+    if (name == "cow" || name == "mushroom_cow")
+    {
+        setAnimal(name == "cow" ? AnimalKind::Cow : AnimalKind::Mooshroom,
+                  {ItemType::WheatItem});
+        commonAnimalTasks(2.0, 1.0, 1.25, 1.25, 1.0, 6, 7,
+                          {ItemType::WheatItem});
+    }
+    else if (name == "pig")
+    {
+        setAnimal(AnimalKind::Pig,
+                  {ItemType::Carrot, ItemType::Potato,
+                   ItemType::BeetrootItem});
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::Panic, 1, 1, 1.25),
+            task(MobGoalKind::Mate, 3, 3, 1.0),
+            task(MobGoalKind::Tempt, 4, 3, 1.2, 10.0f, 2.5f, 0.0f,
+                 {ItemType::Carrot, ItemType::Potato,
+                  ItemType::BeetrootItem}),
+            task(MobGoalKind::FollowParent, 5, 0, 1.1, 8.0f, 3.0f),
+            task(MobGoalKind::WanderAvoidWater, 6, 1, 1.0, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::WatchPlayer, 7, 2, 1.0, 6.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 8, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+    }
+    else if (name == "sheep")
+    {
+        setAnimal(AnimalKind::Sheep, {ItemType::WheatItem});
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::Panic, 1, 1, 1.25),
+            task(MobGoalKind::Mate, 2, 3, 1.0),
+            task(MobGoalKind::Tempt, 3, 3, 1.1, 10.0f, 2.5f, 0.0f,
+                 {ItemType::WheatItem}),
+            task(MobGoalKind::FollowParent, 4, 0, 1.1, 8.0f, 3.0f),
+            task(MobGoalKind::EatGrass, 5, 7),
+            task(MobGoalKind::WanderAvoidWater, 6, 1, 1.0, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::WatchPlayer, 7, 2, 1.0, 6.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 8, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+    }
+    else if (name == "chicken")
+    {
+        setAnimal(AnimalKind::Chicken,
+                  {ItemType::Seeds, ItemType::MelonSeeds,
+                   ItemType::PumpkinSeeds, ItemType::BeetrootSeeds});
+        commonAnimalTasks(1.4, 1.0, 1.0, 1.1, 1.0, 6, 7,
+                          {ItemType::Seeds, ItemType::MelonSeeds,
+                           ItemType::PumpkinSeeds,
+                           ItemType::BeetrootSeeds});
+    }
+    else if (name == "rabbit")
+    {
+        setAnimal(AnimalKind::Rabbit,
+                  {ItemType::Carrot, ItemType::GoldenCarrot,
+                   itemFromBlock(BlockType::Dandelion)});
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 1, 4),
+            task(MobGoalKind::Panic, 1, 1, 2.2),
+            task(MobGoalKind::Mate, 2, 3, 0.8),
+            task(MobGoalKind::Tempt, 3, 3, 1.0, 10.0f, 2.5f, 0.0f,
+                 {ItemType::Carrot, ItemType::GoldenCarrot,
+                  itemFromBlock(BlockType::Dandelion)}),
+            task(MobGoalKind::AvoidPlayer, 4, 1, 2.2, 8.0f),
+            task(MobGoalKind::WanderAvoidWater, 6, 1, 0.6, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::WatchPlayer, 11, 2, 1.0, 10.0f,
+                 0.0f, 0.02f)
+        };
+    }
+    else if (name == "wolf")
+    {
+        const std::initializer_list<ItemType> meats{
+            ItemType::RawBeef, ItemType::CookedBeef,
+            ItemType::RawChicken, ItemType::CookedChicken,
+            ItemType::RawMutton, ItemType::CookedMutton,
+            ItemType::RawPorkchop, ItemType::CookedPorkchop,
+            ItemType::RawRabbit, ItemType::CookedRabbit,
+            ItemType::RottenFlesh
+        };
+        setAnimal(AnimalKind::Wolf, meats);
+        definition.tameableKind = TameableKind::Wolf;
+        definition.tamingItems = {ItemType::Bone};
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 1, 4),
+            task(MobGoalKind::Sit, 2, 5),
+            task(MobGoalKind::LeapAtTarget, 4, 5, 1.0, 0.4f),
+            task(MobGoalKind::MeleeAttack, 5, 3, 1.0, 1.5f),
+            task(MobGoalKind::FollowOwner, 6, 3, 1.0, 10.0f, 2.0f),
+            task(MobGoalKind::Mate, 7, 3, 1.0),
+            task(MobGoalKind::WanderAvoidWater, 8, 1, 1.0, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::Beg, 9, 2, 1.0, 8.0f, 0.0f, 0.02f,
+                 meats),
+            task(MobGoalKind::WatchPlayer, 10, 2, 1.0, 8.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 10, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+        definition.targetGoalTasks = {
+            task(MobGoalKind::HurtByTarget, 3, 0)
+        };
+    }
+    else if (name == "ocelot")
+    {
+        setAnimal(AnimalKind::Ocelot, {ItemType::RawFish});
+        definition.tameableKind = TameableKind::Ocelot;
+        definition.tamingItems = {ItemType::RawFish};
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 1, 4),
+            task(MobGoalKind::Sit, 2, 5),
+            task(MobGoalKind::Tempt, 3, 3, 0.6, 10.0f, 2.5f, 0.0f,
+                 {ItemType::RawFish}),
+            task(MobGoalKind::FollowOwner, 5, 3, 1.0, 10.0f, 5.0f),
+            task(MobGoalKind::LeapAtTarget, 7, 5, 1.0, 0.3f),
+            task(MobGoalKind::MeleeAttack, 8, 3, 0.8, 1.5f),
+            task(MobGoalKind::Mate, 9, 3, 0.8),
+            task(MobGoalKind::WanderAvoidWater, 10, 1, 0.8, 10.0f,
+                 0.0f, 0.00001f),
+            task(MobGoalKind::WatchPlayer, 11, 2, 1.0, 10.0f,
+                 0.0f, 0.02f)
+        };
+    }
+    else if (name == "parrot")
+    {
+        definition.ageable = true;
+        definition.tameableKind = TameableKind::Parrot;
+        definition.tamingItems = {
+            ItemType::Seeds, ItemType::MelonSeeds,
+            ItemType::PumpkinSeeds, ItemType::BeetrootSeeds
+        };
+        definition.goalTasks = {
+            task(MobGoalKind::Panic, 0, 1, 1.25),
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::WatchPlayer, 1, 2, 1.0, 8.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::Sit, 2, 5),
+            task(MobGoalKind::FollowOwner, 2, 3, 1.0, 5.0f, 1.0f),
+            task(MobGoalKind::WanderAvoidWater, 2, 1, 1.0, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::LandOnOwnerShoulder, 3, 0)
+        };
+    }
+    else if (name == "horse" || name == "donkey" || name == "mule" ||
+             name == "skeleton_horse" || name == "zombie_horse")
+    {
+        definition.ageable = true;
+        definition.stepHeight = 1.0f;
+        definition.animalKind = name == "horse" ? AnimalKind::Horse
+            : name == "donkey" ? AnimalKind::Donkey
+            : name == "mule" ? AnimalKind::Mule : AnimalKind::None;
+        definition.breedable = name == "horse" || name == "donkey";
+        if (definition.breedable)
+            definition.breedingItems = {
+                ItemType::GoldenCarrot, ItemType::GoldenApple
+            };
+        definition.tameableKind = name == "horse" ? TameableKind::Horse
+            : name == "donkey" ? TameableKind::Donkey
+            : name == "mule" ? TameableKind::Mule
+            : name == "skeleton_horse" ? TameableKind::SkeletonHorse
+            : TameableKind::ZombieHorse;
+        definition.maximumTemper = 100;
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::Panic, 1, 1, 1.2),
+            task(MobGoalKind::RunAroundLikeCrazy, 1, 1, 1.2),
+            task(MobGoalKind::Mate, 2, 3, 1.0),
+            task(MobGoalKind::FollowParent, 4, 0, 1.0, 8.0f, 3.0f),
+            task(MobGoalKind::WanderAvoidWater, 6, 1, 0.7, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::WatchPlayer, 7, 2, 1.0, 6.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 8, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+    }
+    else if (name == "llama")
+    {
+        setAnimal(AnimalKind::Llama, {itemFromBlock(BlockType::HayBale)});
+        definition.tameableKind = TameableKind::Llama;
+        definition.maximumTemper = 30;
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::RunAroundLikeCrazy, 1, 1, 1.2),
+            task(MobGoalKind::FollowCaravan, 2, 1, 2.0999999046325684),
+            task(MobGoalKind::RangedAttack, 3, 3, 1.25, 20.0f),
+            task(MobGoalKind::Panic, 3, 1, 1.2),
+            task(MobGoalKind::Mate, 4, 3, 1.0),
+            task(MobGoalKind::FollowParent, 5, 0, 1.0, 8.0f, 3.0f),
+            task(MobGoalKind::WanderAvoidWater, 6, 1, 0.7, 10.0f,
+                 0.0f, 0.001f),
+            task(MobGoalKind::WatchPlayer, 7, 2, 1.0, 6.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 8, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+    }
+    else if (name == "polar_bear")
+    {
+        definition.ageable = true;
+        definition.animalKind = AnimalKind::PolarBear;
+        definition.goalTasks = {
+            task(MobGoalKind::Swim, 0, 4),
+            task(MobGoalKind::MeleeAttack, 1, 3, 1.25, 1.5f),
+            task(MobGoalKind::Panic, 1, 1, 2.0),
+            task(MobGoalKind::FollowParent, 4, 0, 1.25, 8.0f, 3.0f),
+            task(MobGoalKind::WanderAvoidWater, 5, 1, 1.0, 10.0f,
+                 0.0f, 1.0f / 120.0f),
+            task(MobGoalKind::WatchPlayer, 6, 2, 1.0, 6.0f,
+                 0.0f, 0.02f),
+            task(MobGoalKind::LookIdle, 7, 3, 1.0, 0.0f,
+                 0.0f, 0.02f)
+        };
+    }
+
+    if (name == "spider" || name == "cave_spider")
+        definition.stepHeight = 0.6f;
+    if (name == "enderman")
+        definition.stepHeight = 1.0f;
+}
 }
 
 GameplayRegistries::GameplayRegistries()
@@ -345,6 +663,7 @@ void registerVanillaGameplay(GameplayRegistries& registries)
             1.0f, {}, {}
         };
         configureVanillaAi(name, definition);
+        configureReleaseEntityData(name, definition);
         registries.registerMob(
             core::ResourceLocation("minecraft", name), std::move(definition)
         );
@@ -411,6 +730,7 @@ void registerVanillaGameplay(GameplayRegistries& registries)
         1.0f, {}, {}
     };
     configureVanillaAi("wither", wither);
+    configureReleaseEntityData("wither", wither);
     registries.registerMob(
         core::ResourceLocation("minecraft:wither"), std::move(wither)
     );

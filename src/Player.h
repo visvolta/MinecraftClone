@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Block.h"
+#include "entity/EntityUuid.h"
 #include "gameplay/SurvivalStats.h"
 
 #include <glm/glm.hpp>
@@ -17,6 +18,7 @@ struct PlayerPersistentState
     int air = 300;
     int fireTicks = 0;
     int ticksExisted = 0;
+    mc::entity::EntityUuid uuid{};
     mc::gameplay::SurvivalPersistentState survival;
 };
 
@@ -65,11 +67,16 @@ public:
     void resetAttackCooldown() noexcept;
     void setBlocking(bool blocking) noexcept;
     [[nodiscard]] bool isBlocking() const noexcept;
+    [[nodiscard]] const mc::entity::EntityUuid& uuid() const noexcept;
     void damage(int amount, const glm::vec3& sourcePosition) noexcept;
 
     void setNoClip(bool enabled) noexcept;
     [[nodiscard]] bool isNoClip() const noexcept;
     void respawn(const glm::vec3& feetPosition) noexcept;
+    void setRidingPosition(const glm::vec3& feetPosition) noexcept;
+    void startRiding() noexcept;
+    void stopRiding() noexcept;
+    [[nodiscard]] bool isRiding() const noexcept;
     [[nodiscard]] PlayerPersistentState persistentState() const noexcept;
     void restorePersistentState(const PlayerPersistentState& state) noexcept;
 
@@ -141,9 +148,11 @@ private:
     bool collidedHorizontally_ = false;
     int sprintToggleTicks_ = 0;
     bool blocking_ = false;
+    bool riding_ = false;
     float previousFovMultiplier_ = 1.0f;
     float fovMultiplier_ = 1.0f;
     glm::vec3 lookDirection_{0.0f, 0.0f, 1.0f};
+    mc::entity::EntityUuid uuid_ = mc::entity::EntityUuid::random();
     mc::gameplay::SurvivalStats survival_;
 
     void simulateTick(GLFWwindow* window, const World& world, const Camera& camera);

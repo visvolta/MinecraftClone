@@ -103,7 +103,24 @@ enum class ItemType : std::uint16_t
     SpiderEye,
     Sugar,
     TippedArrow,
-    TotemOfUndying
+    TotemOfUndying,
+
+    Cookie,
+    GoldenApple,
+    GoldenCarrot,
+    MelonSeeds,
+    PumpkinSeeds,
+    Saddle,
+    Shears,
+    CookedChicken,
+    CookedFish,
+    CookedMutton,
+    CookedPorkchop,
+    CookedRabbit,
+    IronHorseArmor,
+    GoldenHorseArmor,
+    DiamondHorseArmor,
+    Lead
 };
 
 enum class ArmorSlot : std::uint8_t

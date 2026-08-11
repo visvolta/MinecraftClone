@@ -103,6 +103,22 @@ std::string_view itemTexture(ItemType item)
         case ItemType::Sugar: return "items/sugar";
         case ItemType::TippedArrow: return "items/tipped_arrow_base";
         case ItemType::TotemOfUndying: return "items/totem";
+        case ItemType::Cookie: return "items/cookie";
+        case ItemType::GoldenApple: return "items/apple_golden";
+        case ItemType::GoldenCarrot: return "items/carrot_golden";
+        case ItemType::MelonSeeds: return "items/seeds_melon";
+        case ItemType::PumpkinSeeds: return "items/seeds_pumpkin";
+        case ItemType::Saddle: return "items/saddle";
+        case ItemType::Shears: return "items/shears";
+        case ItemType::CookedChicken: return "items/chicken_cooked";
+        case ItemType::CookedFish: return "items/fish_cod_cooked";
+        case ItemType::CookedMutton: return "items/mutton_cooked";
+        case ItemType::CookedPorkchop: return "items/porkchop_cooked";
+        case ItemType::CookedRabbit: return "items/rabbit_cooked";
+        case ItemType::IronHorseArmor: return "items/iron_horse_armor";
+        case ItemType::GoldenHorseArmor: return "items/gold_horse_armor";
+        case ItemType::DiamondHorseArmor: return "items/diamond_horse_armor";
+        case ItemType::Lead: return "items/lead";
         case ItemType::Empty: break;
     }
     return {};
@@ -127,7 +143,7 @@ ItemAtlas::ItemAtlas(const std::filesystem::path& textureRoot)
 {
     std::vector<ItemType> items;
     const auto first = static_cast<std::uint16_t>(ItemType::Stick);
-    const auto last = static_cast<std::uint16_t>(ItemType::TotemOfUndying);
+    const auto last = static_cast<std::uint16_t>(ItemType::Lead);
     for (std::uint16_t value = first; value <= last; ++value)
     {
         const ItemType item = static_cast<ItemType>(value);

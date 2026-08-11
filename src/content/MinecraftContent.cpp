@@ -794,6 +794,22 @@ void registerMinecraftContent(
     addItem(catalog, ItemType::Sugar, "sugar", "Sugar");
     addItem(catalog, ItemType::TippedArrow, "tipped_arrow", "Tipped Arrow");
     addItem(catalog, ItemType::TotemOfUndying, "totem_of_undying", "Totem of Undying");
+    addItem(catalog, ItemType::Cookie, "cookie", "Cookie");
+    addItem(catalog, ItemType::GoldenApple, "golden_apple", "Golden Apple");
+    addItem(catalog, ItemType::GoldenCarrot, "golden_carrot", "Golden Carrot");
+    addItem(catalog, ItemType::MelonSeeds, "melon_seeds", "Melon Seeds");
+    addItem(catalog, ItemType::PumpkinSeeds, "pumpkin_seeds", "Pumpkin Seeds");
+    addItem(catalog, ItemType::Saddle, "saddle", "Saddle");
+    addItem(catalog, ItemType::Shears, "shears", "Shears");
+    addItem(catalog, ItemType::CookedChicken, "cooked_chicken", "Cooked Chicken");
+    addItem(catalog, ItemType::CookedFish, "cooked_fish", "Cooked Fish");
+    addItem(catalog, ItemType::CookedMutton, "cooked_mutton", "Cooked Mutton");
+    addItem(catalog, ItemType::CookedPorkchop, "cooked_porkchop", "Cooked Porkchop");
+    addItem(catalog, ItemType::CookedRabbit, "cooked_rabbit", "Cooked Rabbit");
+    addItem(catalog, ItemType::IronHorseArmor, "iron_horse_armor", "Iron Horse Armor");
+    addItem(catalog, ItemType::GoldenHorseArmor, "golden_horse_armor", "Golden Horse Armor");
+    addItem(catalog, ItemType::DiamondHorseArmor, "diamond_horse_armor", "Diamond Horse Armor");
+    addItem(catalog, ItemType::Lead, "lead", "Lead");
 
     catalog.registerEntityType(id("item"), {"Dropped Item"});
     catalog.registerBlockEntityType(id("furnace"), {"Furnace", 1});

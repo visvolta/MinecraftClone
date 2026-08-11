@@ -259,8 +259,13 @@ set(MINECRAFT_CLONE_SOURCES
     src/ItemEntityManager.cpp
     src/ItemEntityRenderer.cpp
     src/client/render/MobEntityRenderer.cpp
+    src/entity/EntityUuid.cpp
     src/entity/MobEntity.cpp
     src/entity/MobEntityManager.cpp
+    src/entity/ai/Goal.cpp
+    src/entity/ai/MobAiController.cpp
+    src/entity/navigation/PathNavigation.cpp
+    src/entity/navigation/WorldNavigationBlockAccess.cpp
     src/Player.cpp
     src/PlayerHUD.cpp
     src/PostProcessor.cpp
@@ -373,6 +378,23 @@ if(BUILD_TESTING)
     )
     add_test(NAME minecraft_save_game_tests COMMAND minecraft_save_game_tests)
 
+    add_executable(minecraft_entity_runtime_tests
+        tests/EntityRuntimeTests.cpp
+        src/entity/ai/Goal.cpp
+        src/entity/navigation/PathNavigation.cpp
+    )
+    target_include_directories(minecraft_entity_runtime_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(minecraft_entity_runtime_tests PRIVATE
+        minecraft_game
+        glm::glm
+    )
+    add_test(
+        NAME minecraft_entity_runtime_tests
+        COMMAND minecraft_entity_runtime_tests
+    )
+
     add_executable(minecraft_gameplay_data_tests
         tests/GameplayDataTests.cpp
         src/BlockDrops.cpp
@@ -438,6 +460,7 @@ if(BUILD_TESTING)
         minecraft_registry_tests
         minecraft_resource_pack_tests
         minecraft_gameplay_data_tests
+        minecraft_entity_runtime_tests
         minecraft_migration_stages_tests
         PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )

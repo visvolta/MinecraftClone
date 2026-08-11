@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -19,13 +20,15 @@ constexpr std::uint32_t NAMESPACED_BLOCK_VERSION = 2;
 constexpr std::uint32_t REGISTRY_ENTITY_VERSION = 3;
 constexpr std::uint32_t SURVIVAL_HEIGHT_VERSION = 4;
 constexpr std::uint32_t SPAWN_VERSION = 5;
-constexpr std::uint32_t VERSION = 6;
+constexpr std::uint32_t GENERATOR_VERSION = 6;
+constexpr std::uint32_t VERSION = 7;
 constexpr int LEGACY_HEIGHT = 128;
 constexpr std::size_t LEGACY_BLOCK_COUNT =
     static_cast<std::size_t>(Chunk::WIDTH * LEGACY_HEIGHT * Chunk::DEPTH);
 constexpr std::uint32_t MAX_CHUNKS = 16384;
 constexpr std::uint32_t MAX_BLOCK_ENTITIES = 1'000'000;
 constexpr std::uint32_t MAX_FLUID_TICKS = 2'000'000;
+constexpr std::uint32_t MAX_MOBS = 4096;
 
 class Writer
 {
@@ -118,7 +121,7 @@ bool validItemValue(std::uint16_t value)
 {
     return (value > 0 && value <= static_cast<std::uint16_t>(BlockType::Cobweb)) ||
            (value >= static_cast<std::uint16_t>(ItemType::Stick) &&
-            value <= static_cast<std::uint16_t>(ItemType::TotemOfUndying));
+            value <= static_cast<std::uint16_t>(ItemType::Lead));
 }
 
 void writeStack(Writer& writer, const ItemStack& stack)
@@ -126,6 +129,19 @@ void writeStack(Writer& writer, const ItemStack& stack)
     writer.value(static_cast<std::uint16_t>(stack.item));
     writer.value(stack.count);
     writer.value(stack.damage);
+}
+
+void writeUuid(Writer& writer, const mc::entity::EntityUuid& uuid)
+{
+    writer.value(uuid.most);
+    writer.value(uuid.least);
+}
+
+mc::entity::EntityUuid readUuid(Reader& reader)
+{
+    return {
+        reader.value<std::uint64_t>(), reader.value<std::uint64_t>()
+    };
 }
 
 ItemStack readStack(Reader& reader)
@@ -401,6 +417,39 @@ void writeData(
         writer.value(static_cast<std::uint8_t>(tick.liquid));
         writer.value(tick.remainingTicks);
     }
+
+    writeUuid(writer, data.player.uuid);
+    if (data.mobs.size() > MAX_MOBS)
+        throw std::runtime_error("Cannot save more than 4096 mobs");
+    writer.value(static_cast<std::uint32_t>(data.mobs.size()));
+    for (const mc::entity::MobPersistentState& mob : data.mobs)
+    {
+        writer.string(mob.type.toString());
+        writeUuid(writer, mob.uuid);
+        writeUuid(writer, mob.ownerUuid);
+        writeUuid(writer, mob.loveCauseUuid);
+        writeUuid(writer, mob.leashHolderUuid);
+        writer.value(mob.position.x);
+        writer.value(mob.position.y);
+        writer.value(mob.position.z);
+        writer.value(mob.velocity.x);
+        writer.value(mob.velocity.y);
+        writer.value(mob.velocity.z);
+        writer.value(mob.yaw);
+        writer.value(mob.health);
+        writer.value(mob.ticksExisted);
+        writer.value(mob.growingAge);
+        writer.value(mob.forcedAge);
+        writer.value(mob.inLove);
+        writer.value(mob.variant);
+        writer.value(mob.temper);
+        writer.value(mob.tamed);
+        writer.value(mob.sitting);
+        writer.value(mob.sheared);
+        writer.value(mob.saddled);
+        writer.value(mob.leashed);
+        writeStack(writer, mob.armor);
+    }
 }
 
 GameSaveData readData(
@@ -418,13 +467,14 @@ GameSaveData readData(
         version != REGISTRY_ENTITY_VERSION &&
         version != SURVIVAL_HEIGHT_VERSION &&
         version != SPAWN_VERSION &&
+        version != GENERATOR_VERSION &&
         version != VERSION)
         throw std::runtime_error("Unsupported world save version");
 
     GameSaveData data;
     data.seed = reader.value<int>();
     data.worldTime = reader.value<std::uint64_t>();
-    data.generationVersion = version >= VERSION
+    data.generationVersion = version >= GENERATOR_VERSION
         ? reader.value<std::uint32_t>()
         : 1U;
     if (version >= SPAWN_VERSION)
@@ -565,6 +615,53 @@ GameSaveData readData(
         tick.liquid = static_cast<BlockType>(liquid);
         tick.remainingTicks = reader.value<std::uint64_t>();
         data.fluidTicks.push_back(tick);
+    }
+    if (version >= VERSION)
+    {
+        data.player.uuid = readUuid(reader);
+        const std::uint32_t mobCount = reader.value<std::uint32_t>();
+        if (mobCount > MAX_MOBS)
+            throw std::runtime_error("World save contains too many mobs");
+        data.mobs.reserve(mobCount);
+        for (std::uint32_t index = 0; index < mobCount; ++index)
+        {
+            mc::entity::MobPersistentState mob;
+            mob.type = mc::core::ResourceLocation(reader.string());
+            mob.uuid = readUuid(reader);
+            mob.ownerUuid = readUuid(reader);
+            mob.loveCauseUuid = readUuid(reader);
+            mob.leashHolderUuid = readUuid(reader);
+            mob.position.x = reader.value<float>();
+            mob.position.y = reader.value<float>();
+            mob.position.z = reader.value<float>();
+            mob.velocity.x = reader.value<float>();
+            mob.velocity.y = reader.value<float>();
+            mob.velocity.z = reader.value<float>();
+            mob.yaw = reader.value<float>();
+            mob.health = reader.value<float>();
+            mob.ticksExisted = reader.value<int>();
+            mob.growingAge = reader.value<int>();
+            mob.forcedAge = reader.value<int>();
+            mob.inLove = reader.value<int>();
+            mob.variant = reader.value<int>();
+            mob.temper = reader.value<int>();
+            mob.tamed = reader.value<bool>();
+            mob.sitting = reader.value<bool>();
+            mob.sheared = reader.value<bool>();
+            mob.saddled = reader.value<bool>();
+            mob.leashed = reader.value<bool>();
+            mob.armor = readStack(reader);
+            if (!std::isfinite(mob.position.x) ||
+                !std::isfinite(mob.position.y) ||
+                !std::isfinite(mob.position.z) ||
+                mob.position.y < -64.0f ||
+                mob.position.y > static_cast<float>(Chunk::HEIGHT + 64) ||
+                !std::isfinite(mob.health) || mob.health < 0.0f)
+                throw std::runtime_error(
+                    "World save contains invalid mob data"
+                );
+            data.mobs.push_back(std::move(mob));
+        }
     }
     return data;
 }

@@ -5,6 +5,7 @@
 #include "FluidSystem.h"
 #include "Inventory.h"
 #include "Player.h"
+#include "entity/MobEntity.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -26,6 +27,7 @@ struct GameSaveData
     std::vector<ChunkSnapshot> modifiedChunks;
     std::vector<BlockEntityRecord> blockEntities;
     std::vector<FluidScheduledTickSnapshot> fluidTicks;
+    std::vector<mc::entity::MobPersistentState> mobs;
 };
 
 namespace SaveGame

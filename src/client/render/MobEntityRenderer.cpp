@@ -143,7 +143,8 @@ std::vector<Vertex> buildVertices(
             animation.headPitch, animation.attackProgress,
             animation.jumpProgress, animation.hurtProgress,
             animation.deathProgress,
-            animation.onGround, animation.inWater, animation.aggressive
+            animation.onGround, animation.inWater, animation.aggressive,
+            animation.child, animation.sitting, animation.begging
         }
     );
     std::vector<glm::mat4> matrices(model.parts.size(), glm::mat4(1.0f));
@@ -269,12 +270,32 @@ void MobEntityRenderer::draw(
         transform=glm::scale(
             transform,glm::vec3(entity.renderScale())
         );
+        if (entity.type().path() == "creeper")
+        {
+            float swell = std::clamp(animation.attackProgress, 0.0f, 1.0f);
+            const float pulse = 1.0f + std::sin(swell * 100.0f) * swell * 0.01f;
+            swell *= swell;
+            swell *= swell;
+            transform = glm::scale(transform, glm::vec3(
+                (1.0f + swell * 0.4f) * pulse,
+                (1.0f + swell * 0.1f) / pulse,
+                (1.0f + swell * 0.4f) * pulse
+            ));
+        }
         shader_->setMat4("model",transform);
         const glm::vec3 hurtTint = glm::mix(
             glm::vec3(1.0f), glm::vec3(1.0f,0.35f,0.35f),
             animation.hurtProgress
         );
-        shader_->setVec3("entityTint",hurtTint);
+        const bool creeperFlash = entity.type().path() == "creeper" &&
+            static_cast<int>(animation.attackProgress * 10.0f) % 2 != 0;
+        shader_->setVec3(
+            "entityTint",
+            creeperFlash
+                ? glm::mix(hurtTint, glm::vec3(1.0f),
+                           animation.attackProgress * 0.2f)
+                : hurtTint
+        );
         textureFor(entity.texture()).bind(0);
         glDrawArrays(
             GL_TRIANGLES,0,static_cast<GLsizei>(vertices.size())

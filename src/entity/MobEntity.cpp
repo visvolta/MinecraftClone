@@ -537,7 +537,7 @@ MobAnimationState MobEntity::animationState(float partialTick) const noexcept
         static_cast<float>(hurtTicks_) / 10.0f,
         std::clamp((static_cast<float>(deathTicks_) + partial) / 20.0f,
                    0.0f, 1.0f),
-        onGround_, inWater_, aggressive_
+        onGround_, inWater_, aggressive_, isChild(), sitting_, begging_
     };
 }
 

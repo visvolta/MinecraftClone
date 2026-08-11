@@ -21,7 +21,7 @@ class Chunk;
 class TerrainGenerator
 {
 public:
-    static constexpr std::uint32_t CURRENT_GENERATION_VERSION = 3;
+    static constexpr std::uint32_t CURRENT_GENERATION_VERSION = 4;
     explicit TerrainGenerator(int seed = 1337);
     ~TerrainGenerator();
 

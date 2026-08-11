@@ -6,6 +6,8 @@
 #include <functional>
 #include <optional>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 class Chunk;
 class JavaRandom;
@@ -15,7 +17,10 @@ enum class WorldStructure : std::uint8_t
 {
     Mineshaft,
     Village,
-    Temple
+    Temple,
+    Stronghold,
+    OceanMonument,
+    WoodlandMansion
 };
 
 struct StructureLocation
@@ -48,14 +53,24 @@ public:
 
 private:
     std::int64_t worldSeed_ = 0;
+    std::vector<std::pair<int, int>> strongholdChunks_;
 
     [[nodiscard]] bool isVillageChunk(int chunkX, int chunkZ) const;
     [[nodiscard]] bool isTempleChunk(int chunkX, int chunkZ) const;
     [[nodiscard]] bool isMineshaftChunk(int chunkX, int chunkZ) const;
+    [[nodiscard]] bool isStrongholdChunk(int chunkX, int chunkZ) const;
+    [[nodiscard]] bool isOceanMonumentChunk(int chunkX, int chunkZ) const;
+    [[nodiscard]] bool isWoodlandMansionChunk(int chunkX, int chunkZ) const;
     void generateMineshaft(
         WorldGenerationContext&, JavaRandom&, int, int) const;
     void generateVillage(
         WorldGenerationContext&, JavaRandom&, int, int, BiomeId) const;
     void generateTemple(
         WorldGenerationContext&, JavaRandom&, int, int, BiomeId) const;
+    void generateStronghold(
+        WorldGenerationContext&, JavaRandom&, int, int) const;
+    void generateOceanMonument(
+        WorldGenerationContext&, JavaRandom&, int, int) const;
+    void generateWoodlandMansion(
+        WorldGenerationContext&, JavaRandom&, int, int) const;
 };

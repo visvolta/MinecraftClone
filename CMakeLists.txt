@@ -201,6 +201,7 @@ add_library(minecraft_world STATIC
     src/worldgen/JavaRandom.cpp
     src/worldgen/SurfaceBuilder.cpp
     src/worldgen/TreeGenerator.cpp
+    src/worldgen/VanillaBiomeLayer.cpp
 )
 target_include_directories(minecraft_world PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src

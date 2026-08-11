@@ -620,19 +620,50 @@ void animateMobModel(
         named(model,"left_arm").rotation.x=std::cos(walk)*amount;
         named(model,"right_leg").rotation.x=std::cos(walk)*1.4f*amount;
         named(model,"left_leg").rotation.x=std::cos(walk+pi)*1.4f*amount;
-        if(state.aggressive)
-        {
-            named(model,"right_arm").rotation.x=-pi/2-0.35f*std::sin(state.attackProgress*pi);
-            named(model,"left_arm").rotation.x=-pi/2-0.35f*std::sin(state.attackProgress*pi);
-        }
         named(model,"right_arm").rotation.z+=std::cos(state.age*.09f)*.05f+.05f;
         named(model,"left_arm").rotation.z-=std::cos(state.age*.09f)*.05f+.05f;
+        named(model,"right_arm").rotation.x+=std::sin(state.age*.067f)*.05f;
+        named(model,"left_arm").rotation.x-=std::sin(state.age*.067f)*.05f;
+    };
+    const auto animateZombieArms=[&]()
+    {
+        const float swing=std::sin(state.attackProgress*pi);
+        const float eased=std::sin(
+            (1.0f-(1.0f-state.attackProgress)*(1.0f-state.attackProgress))*pi
+        );
+        auto& right=named(model,"right_arm");
+        auto& left=named(model,"left_arm");
+        right.rotation.z=0.0f;
+        left.rotation.z=0.0f;
+        right.rotation.y=-(0.1f-swing*0.6f);
+        left.rotation.y=0.1f-swing*0.6f;
+        const float raised=state.aggressive ? -pi/1.5f : -pi/2.25f;
+        right.rotation.x=raised+swing*1.2f-eased*.4f;
+        left.rotation.x=raised+swing*1.2f-eased*.4f;
+        right.rotation.z+=std::cos(state.age*.09f)*.05f+.05f;
+        left.rotation.z-=std::cos(state.age*.09f)*.05f+.05f;
+        right.rotation.x+=std::sin(state.age*.067f)*.05f;
+        left.rotation.x-=std::sin(state.age*.067f)*.05f;
     };
     switch(kind)
     {
         case MobModelKind::Biped:
+        case MobModelKind::ZombieVillager:
+            animateBiped();
+            animateZombieArms();
+            break;
         case MobModelKind::Skeleton:
-        case MobModelKind::ZombieVillager: animateBiped(); break;
+            animateBiped();
+            if(state.aggressive)
+            {
+                auto& right=named(model,"right_arm");
+                auto& left=named(model,"left_arm");
+                right.rotation.y=-.1f+state.headYaw;
+                left.rotation.y=.1f+state.headYaw+.4f;
+                right.rotation.x=-pi/2+state.headPitch;
+                left.rotation.x=-pi/2+state.headPitch;
+            }
+            break;
         case MobModelKind::Enderman:
             animateBiped();
             for(const char* limb:{"right_arm","left_arm","right_leg","left_leg"})
@@ -677,16 +708,38 @@ void animateMobModel(
             named(model,"left_wing").rotation.z=-state.age;
             break;
         case MobModelKind::Spider:
-            for(int i=0;i<8;++i)
+        {
+            const std::array<float,8> baseZ{
+                -pi/4,pi/4,-.58119464f,.58119464f,
+                -.58119464f,.58119464f,-pi/4,pi/4
+            };
+            const std::array<float,8> baseY{
+                pi/4,-pi/4,.3926991f,-.3926991f,
+                -.3926991f,.3926991f,-pi/4,pi/4
+            };
+            const std::array<float,4> yawDelta{
+                -std::cos(walk*2.0f)*.4f*amount,
+                -std::cos(walk*2.0f+pi)*.4f*amount,
+                -std::cos(walk*2.0f+pi/2)*.4f*amount,
+                -std::cos(walk*2.0f+pi*1.5f)*.4f*amount
+            };
+            const std::array<float,4> rollDelta{
+                std::abs(std::sin(walk)*.4f)*amount,
+                std::abs(std::sin(walk+pi)*.4f)*amount,
+                std::abs(std::sin(walk+pi/2)*.4f)*amount,
+                std::abs(std::sin(walk+pi*1.5f)*.4f)*amount
+            };
+            for(int pair=0;pair<4;++pair)
             {
-                auto& leg=named(model,("leg"+std::to_string(i+1)).c_str());
-                const bool left=i%2==0; const int pair=i/2;
-                const float baseZ=(pair==0||pair==3?pi/4:.58119464f)*(left?-1:1);
-                const float baseY=(pair<2?1:-1)*(pair==0||pair==3?pi/4:.3926991f)*(left?1:-1);
-                leg.rotation.z=baseZ+(left?-1:1)*std::abs(std::sin(walk+pair*pi/2))*.4f*amount;
-                leg.rotation.y=baseY+(left?1:-1)*std::cos(walk*2+pair*pi/2)*.4f*amount;
+                auto& first=named(model,("leg"+std::to_string(pair*2+1)).c_str());
+                auto& second=named(model,("leg"+std::to_string(pair*2+2)).c_str());
+                first.rotation={0,baseY[pair*2]+yawDelta[pair],
+                                baseZ[pair*2]+rollDelta[pair]};
+                second.rotation={0,baseY[pair*2+1]-yawDelta[pair],
+                                 baseZ[pair*2+1]-rollDelta[pair]};
             }
             break;
+        }
         case MobModelKind::Bat:
             named(model,"body").rotation.x=pi/4+std::cos(state.age*.1f)*.15f;
             named(model,"right_wing").rotation.y=std::cos(state.age*1.3f)*pi*.25f;
@@ -720,9 +773,36 @@ void animateMobModel(
         case MobModelKind::Horse:
         case MobModelKind::Llama:
         case MobModelKind::Ocelot:
-        case MobModelKind::Wolf:
             for(int i=0;i<4;++i) if(find(model,("leg"+std::to_string(i+1)).c_str())>=0) named(model,("leg"+std::to_string(i+1)).c_str()).rotation.x=std::cos(walk+(i==0||i==3?0:pi))*1.4f*amount;
             if(find(model,"tail")>=0) named(model,"tail").rotation.y=std::cos(walk)*.4f*amount;
+            break;
+        case MobModelKind::Wolf:
+            if(state.sitting)
+            {
+                named(model,"mane").pivot={-1,16,-3};
+                named(model,"mane").rotation.x=pi*2/5;
+                named(model,"body").pivot={0,18,0};
+                named(model,"body").rotation.x=pi/4;
+                named(model,"tail").pivot={-1,21,6};
+                named(model,"leg1").pivot={-2.5f,22,2};
+                named(model,"leg2").pivot={.5f,22,2};
+                named(model,"leg1").rotation.x=pi*1.5f;
+                named(model,"leg2").rotation.x=pi*1.5f;
+                named(model,"leg3").pivot={-2.49f,17,-4};
+                named(model,"leg4").pivot={.51f,17,-4};
+                named(model,"leg3").rotation.x=5.811947f;
+                named(model,"leg4").rotation.x=5.811947f;
+            }
+            else
+            {
+                for(int i=0;i<4;++i)
+                    named(model,("leg"+std::to_string(i+1)).c_str()).rotation.x=
+                        std::cos(walk+(i==0||i==3?0:pi))*1.4f*amount;
+                named(model,"tail").rotation.y=state.aggressive
+                    ? 0.0f : std::cos(walk)*1.4f*amount;
+            }
+            named(model,"head").rotation.z=state.begging ? .2f : 0.0f;
+            named(model,"tail").rotation.x=.8f;
             break;
         case MobModelKind::Rabbit:
             for(const char* n:{"right_haunch","left_haunch"}) named(model,n).rotation.x=-.349f+state.jumpProgress*.45f;

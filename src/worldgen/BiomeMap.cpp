@@ -1,4 +1,5 @@
 #include "worldgen/BiomeMap.h"
+#include "worldgen/VanillaBiomeLayer.h"
 
 #include <algorithm>
 #include <array>
@@ -208,7 +209,33 @@ std::vector<ClimateSample> BiomeMap::sampleArea(
     int width,
     int depth) const
 {
-    return sampleGrid(originX, originZ, width, depth, 1);
+    const std::vector<BiomeId> biomes = vanillaVoronoiZoom(
+        seed_, originX, originZ, width, depth,
+        [this](int x, int z, int areaWidth, int areaDepth)
+        {
+            const std::vector<ClimateSample> parent = sampleGenerationArea(
+                x, z, areaWidth, areaDepth
+            );
+            std::vector<BiomeId> result;
+            result.reserve(parent.size());
+            for (const ClimateSample& sample : parent)
+                result.push_back(sample.biome);
+            return result;
+        }
+    );
+
+    std::vector<ClimateSample> result;
+    result.reserve(biomes.size());
+    for (const BiomeId biome : biomes)
+    {
+        const BiomeDefinition* definition = BiomeRegistry::active().find(biome);
+        result.push_back({
+            definition == nullptr ? 0.5 : definition->temperature,
+            definition == nullptr ? 0.5 : definition->rainfall,
+            biome
+        });
+    }
+    return result;
 }
 
 std::vector<ClimateSample> BiomeMap::sampleGenerationArea(

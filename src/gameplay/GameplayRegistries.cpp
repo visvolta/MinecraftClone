@@ -282,9 +282,15 @@ void configureReleaseEntityData(
 
     if (definition.category == MobCategory::Monster)
     {
+        const MobGoalKind attackGoal =
+            definition.attackKind == MobAttackKind::CreeperExplosion
+                ? MobGoalKind::CreeperSwell
+                : definition.attackKind == MobAttackKind::Ranged
+                    ? MobGoalKind::RangedAttack
+                    : MobGoalKind::MeleeAttack;
         definition.goalTasks = {
             task(MobGoalKind::Swim, 0, 4),
-            task(MobGoalKind::MeleeAttack, 2, 3, 1.0,
+            task(attackGoal, 2, 3, 1.0,
                  definition.attackRange),
             task(MobGoalKind::WanderAvoidWater, 5, 1, 1.0, 10.0f,
                  0.0f, 1.0f / 120.0f),

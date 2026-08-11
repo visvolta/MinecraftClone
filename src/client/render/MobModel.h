@@ -50,6 +50,9 @@ struct MobPoseState
     bool onGround = true;
     bool inWater = false;
     bool aggressive = false;
+    bool child = false;
+    bool sitting = false;
+    bool begging = false;
 };
 
 [[nodiscard]] MobModelDefinition createMobModel(

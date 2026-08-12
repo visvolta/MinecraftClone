@@ -141,76 +141,17 @@ void setPixel(
         pixels.data() + static_cast<std::size_t>((y * width + x) * 4)
     );
 }
-
-std::filesystem::path resolveItemTexturePath(
-    const std::filesystem::path& packRoot,
-    const mc::core::ResourceLocation& texture)
-{
-    std::vector<std::filesystem::path> candidates;
-
-    const auto add = [&](const std::string& resourcePath)
-    {
-        // Conventional namespaced resource-pack layout.
-        candidates.push_back(
-            packRoot / texture.nameSpace() / "textures" /
-            (resourcePath + ".png")
-        );
-
-        // This project's existing 1.12 PNG layout.
-        if (texture.nameSpace() == "minecraft")
-        {
-            candidates.push_back(
-                packRoot / "textures" /
-                (resourcePath + ".png")
-            );
-        }
-    };
-
-    add(texture.path());
-
-    // Be tolerant of singular/plural imported resource folders.
-    if (texture.path().rfind("block/", 0) == 0)
-        add("blocks/" + texture.path().substr(6));
-    else if (texture.path().rfind("blocks/", 0) == 0)
-        add("block/" + texture.path().substr(7));
-    else if (texture.path().rfind("item/", 0) == 0)
-        add("items/" + texture.path().substr(5));
-    else if (texture.path().rfind("items/", 0) == 0)
-        add("item/" + texture.path().substr(6));
-
-    std::error_code error;
-    for (const auto& candidate : candidates)
-    {
-        if (std::filesystem::is_regular_file(candidate, error))
-        {
-            const auto canonical =
-                std::filesystem::weakly_canonical(candidate, error);
-            return error ? candidate : canonical;
-        }
-        error.clear();
-    }
-
-    // Keep the preferred path for a useful decode error below.
-    return candidates.empty()
-        ? std::filesystem::path{}
-        : candidates.front();
-}
 }
 
 ItemAtlas::ItemAtlas(const std::filesystem::path& textureRoot,const std::filesystem::path& resourceRoot)
 {
     struct Source{ItemType item;std::vector<std::filesystem::path> layers;};
     const auto packRoot=resourceRoot.empty()?textureRoot.parent_path():resourceRoot; mc::content::resources::ResourcePack pack(packRoot);
-    auto layersFor=[&](const mc::core::ResourceLocation& model){std::unordered_map<std::string,std::string> tex;auto cur=model;for(int d=0;d<32;++d){if(cur.path().rfind("builtin/",0)==0)break;const auto m=pack.loadModel(cur);for(const auto& [k,v]:m.textures)tex.try_emplace(k,v);if(!m.parent||m.parent->path().rfind("builtin/",0)==0)break;cur=*m.parent;}auto resolve=[&](std::string v)->std::optional<mc::core::ResourceLocation>{std::unordered_set<std::string> seen;while(!v.empty()&&v.front()=='#'){const auto k=v.substr(1);if(!seen.insert(k).second)return std::nullopt;const auto it=tex.find(k);if(it==tex.end())return std::nullopt;v=it->second;}if(v.empty())return std::nullopt;return mc::core::ResourceLocation(v);};std::vector<std::filesystem::path> r;for(int l=0;l<8;++l){const auto it=tex.find("layer"+std::to_string(l));if(it==tex.end())continue;const auto t=resolve(it->second);if(t)r.push_back(resolveItemTexturePath(packRoot,*t));}return r;};
+    auto layersFor=[&](const mc::core::ResourceLocation& model){std::unordered_map<std::string,std::string> tex;auto cur=model;for(int d=0;d<32;++d){if(cur.path().rfind("builtin/",0)==0)break;const auto m=pack.loadModel(cur);for(const auto& [k,v]:m.textures)tex.try_emplace(k,v);if(!m.parent||m.parent->path().rfind("builtin/",0)==0)break;cur=*m.parent;}auto resolve=[&](std::string v)->std::optional<mc::core::ResourceLocation>{std::unordered_set<std::string> seen;while(!v.empty()&&v.front()=='#'){const auto k=v.substr(1);if(!seen.insert(k).second)return std::nullopt;const auto it=tex.find(k);if(it==tex.end())return std::nullopt;v=it->second;}if(v.empty())return std::nullopt;return mc::core::ResourceLocation(v);};std::vector<std::filesystem::path> r;for(int l=0;l<8;++l){const auto it=tex.find("layer"+std::to_string(l));if(it==tex.end())continue;const auto t=resolve(it->second);if(t)r.push_back(packRoot/t->nameSpace()/"textures"/(t->path()+".png"));}return r;};
     std::vector<Source> srcs;std::unordered_set<std::uint16_t> seen;if(const auto* c=mc::content::ContentCatalog::active())for(const auto& e:c->items().entries()){const auto type=c->itemType(e.name);if(!type||!e.value.model)continue;try{auto ls=layersFor(*e.value.model);if(!ls.empty()){srcs.push_back({*type,std::move(ls)});seen.insert(static_cast<std::uint16_t>(*type));}}catch(const std::exception&){} }
     const auto first=static_cast<std::uint16_t>(ItemType::Stick),last=static_cast<std::uint16_t>(ItemType::Lead);for(std::uint16_t v=first;v<=last;++v){const auto it=static_cast<ItemType>(v);if(seen.contains(v)||itemTexture(it).empty())continue;srcs.push_back({it,{textureRoot/(std::string(itemTexture(it))+".png")}});} if(srcs.empty())throw std::runtime_error("No 1.12 item textures discovered");
     const int cols=static_cast<int>(std::ceil(std::sqrt(static_cast<double>(srcs.size()))));const int rows=static_cast<int>((srcs.size()+cols-1)/cols);const int width=cols*CELL_SIZE_PIXELS,height=rows*CELL_SIZE_PIXELS;std::vector<std::uint8_t> top(static_cast<std::size_t>(width*height*4),0);
-    for(std::size_t idx=0;idx<srcs.size();++idx){std::array<std::uint8_t,1024> comp{};for(const auto& path:srcs[idx].layers){int sw=0,sh=0,ch=0;stbi_set_flip_vertically_on_load(false);unsigned char* px=stbi_load(path.string().c_str(),&sw,&sh,&ch,4);if(!px){const char* reason=stbi_failure_reason();throw std::runtime_error(
-            "Failed to decode 1.12 item texture: "+path.string()+
-            (reason?std::string(" (stb_image: ")+reason+")":std::string{}));}
-        if(sw<16||sh<16){stbi_image_free(px);throw std::runtime_error(
-            "1.12 item texture is smaller than 16x16: "+path.string()+
-            " ("+std::to_string(sw)+"x"+std::to_string(sh)+")");}for(int y=0;y<16;++y)for(int x=0;x<16;++x){const auto* a=px+static_cast<std::size_t>((y*sw+x)*4);auto* b=comp.data()+static_cast<std::size_t>((y*16+x)*4);const float al=a[3]/255.f,inv=1.f-al;for(int c=0;c<3;++c)b[c]=static_cast<std::uint8_t>(a[c]*al+b[c]*inv);b[3]=static_cast<std::uint8_t>(a[3]+b[3]*inv);}stbi_image_free(px);}const int cx=static_cast<int>(idx%cols)*CELL_SIZE_PIXELS,cy=static_cast<int>(idx/cols)*CELL_SIZE_PIXELS;auto& alpha=alpha_[srcs[idx].item];for(int y=0;y<CELL_SIZE_PIXELS;++y){const int sy=std::clamp(y-GUTTER_PIXELS,0,15);for(int x=0;x<CELL_SIZE_PIXELS;++x){const int sx=std::clamp(x-GUTTER_PIXELS,0,15);setPixel(top,width,cx+x,cy+y,comp.data()+static_cast<std::size_t>((sy*16+sx)*4));}}for(int y=0;y<16;++y)for(int x=0;x<16;++x)alpha[static_cast<std::size_t>(y*16+x)]=comp[static_cast<std::size_t>((y*16+x)*4+3)];constexpr float in=.01f;const int ix=cx+GUTTER_PIXELS,iy=cy+GUTTER_PIXELS,gb=height-iy-16;entries_.emplace(srcs[idx].item,AtlasUV{(ix+in)/width,(gb+in)/height,(ix+16-in)/width,(gb+16-in)/height});}
+    for(std::size_t idx=0;idx<srcs.size();++idx){std::array<std::uint8_t,1024> comp{};for(const auto& path:srcs[idx].layers){int sw=0,sh=0,ch=0;stbi_set_flip_vertically_on_load(false);unsigned char* px=stbi_load(path.string().c_str(),&sw,&sh,&ch,4);if(!px||sw<16||sh<16){if(px)stbi_image_free(px);throw std::runtime_error("Missing 1.12 item texture: "+path.string());}for(int y=0;y<16;++y)for(int x=0;x<16;++x){const auto* a=px+static_cast<std::size_t>((y*sw+x)*4);auto* b=comp.data()+static_cast<std::size_t>((y*16+x)*4);const float al=a[3]/255.f,inv=1.f-al;for(int c=0;c<3;++c)b[c]=static_cast<std::uint8_t>(a[c]*al+b[c]*inv);b[3]=static_cast<std::uint8_t>(a[3]+b[3]*inv);}stbi_image_free(px);}const int cx=static_cast<int>(idx%cols)*CELL_SIZE_PIXELS,cy=static_cast<int>(idx/cols)*CELL_SIZE_PIXELS;auto& alpha=alpha_[srcs[idx].item];for(int y=0;y<CELL_SIZE_PIXELS;++y){const int sy=std::clamp(y-GUTTER_PIXELS,0,15);for(int x=0;x<CELL_SIZE_PIXELS;++x){const int sx=std::clamp(x-GUTTER_PIXELS,0,15);setPixel(top,width,cx+x,cy+y,comp.data()+static_cast<std::size_t>((sy*16+sx)*4));}}for(int y=0;y<16;++y)for(int x=0;x<16;++x)alpha[static_cast<std::size_t>(y*16+x)]=comp[static_cast<std::size_t>((y*16+x)*4+3)];constexpr float in=.01f;const int ix=cx+GUTTER_PIXELS,iy=cy+GUTTER_PIXELS,gb=height-iy-16;entries_.emplace(srcs[idx].item,AtlasUV{(ix+in)/width,(gb+in)/height,(ix+16-in)/width,(gb+16-in)/height});}
     std::vector<std::uint8_t> bottom(top.size());const std::size_t rb=static_cast<std::size_t>(width*4);for(int y=0;y<height;++y)std::copy_n(top.data()+static_cast<std::size_t>(y)*rb,rb,bottom.data()+static_cast<std::size_t>(height-y-1)*rb);texture_=std::make_unique<Texture2D>(width,height,bottom);
 }
 

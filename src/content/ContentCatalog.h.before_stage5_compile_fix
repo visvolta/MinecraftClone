@@ -230,9 +230,6 @@ public:
     [[nodiscard]] const ItemDefinition* item(
         const core::ResourceLocation& name
     ) const noexcept;
-    [[nodiscard]] ItemDefinition* mutableItem(
-        const core::ResourceLocation& name
-    ) noexcept;
     [[nodiscard]] std::optional<ItemType> legacyItem(
         const core::ResourceLocation& name
     ) const noexcept;

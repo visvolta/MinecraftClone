@@ -427,12 +427,6 @@ const ItemDefinition* ContentCatalog::item(
     return items_.find(name);
 }
 
-ItemDefinition* ContentCatalog::mutableItem(
-    const core::ResourceLocation& name) noexcept
-{
-    return items_.find(name);
-}
-
 std::optional<ItemType> ContentCatalog::legacyItem(
     const core::ResourceLocation& name) const noexcept
 {

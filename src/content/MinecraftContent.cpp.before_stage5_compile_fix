@@ -527,14 +527,14 @@ std::vector<std::pair<std::string,std::string>> itemVariantProps(std::string_vie
 }
 struct ResourceItemPlacement{core::ResourceLocation block{"minecraft:air"};std::vector<std::pair<std::string,std::string>> properties;};
 bool noItemForm(std::string_view n){return equalsAny(n,{"air","flowing_water","water","flowing_lava","lava","double_stone_slab","double_wooden_slab","fire","portal","end_portal","lit_furnace","lit_redstone_ore","unlit_redstone_torch","powered_repeater","powered_comparator","standing_sign","wall_sign","piston_head","piston_extension","wheat","carrots","potatoes","beetroots","melon_stem","pumpkin_stem","cocoa"});}
-void registerAllResourceItems(ContentCatalog& catalog,const resources::ResourcePack& pack)
+void registerAllResourceItems(ContentCatalog& catalog,resources::ResourcePack& pack)
 {
     std::unordered_map<core::ResourceLocation,ResourceItemPlacement,core::ResourceLocationHash> owners;
     for(const auto& bn:pack.blockStateNames()){const auto bs=pack.loadBlockState(bn);for(const auto& [key,vars]:bs.variants){const auto props=itemVariantProps(key);for(const auto& v:vars)owners.try_emplace(v.model,ResourceItemPlacement{bn,props});}}
     for(const auto& name:pack.itemModelNames()){
         const core::ResourceLocation model(name.nameSpace(),std::string("item/")+name.path()); std::optional<core::ResourceLocation> placed; std::vector<std::pair<std::string,std::string>> props;
         if(catalog.blocks().find(name)) placed=name; else try{const auto raw=pack.loadModel(model);if(raw.parent){const auto it=owners.find(*raw.parent);if(it!=owners.end()){placed=it->second.block;props=it->second.properties;}}}catch(const std::exception&){}
-        if(auto* existing=catalog.mutableItem(name)){existing->model=model;if(!existing->placedBlock&&placed){existing->placedBlock=placed;existing->placementProperties=std::move(props);}continue;}
+        if(auto* existing=catalog.items().find(name)){existing->model=model;if(!existing->placedBlock&&placed){existing->placedBlock=placed;existing->placementProperties=std::move(props);}continue;}
         ItemProperties ip{};ip.name="Minecraft Item";ip.maximumStackSize=64;catalog.registerItem(name,{std::nullopt,displayNameFor(name.path()),placed,ip,model,std::move(props)});
     }
     for(const auto& bn:pack.blockStateNames()){if(!catalog.blocks().find(bn)||catalog.items().find(bn)||noItemForm(bn.path()))continue;ItemProperties ip{};ip.name="Minecraft Block";ip.maximumStackSize=64;catalog.registerItem(bn,{std::nullopt,displayNameFor(bn.path()),bn,ip,std::nullopt,{}});}

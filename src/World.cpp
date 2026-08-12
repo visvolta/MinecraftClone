@@ -492,7 +492,7 @@ bool World::setBlockState(
     }
 
     blockEntities_.onBlockChanged(
-        {worldX, worldY, worldZ}, oldBlock, block
+        {worldX, worldY, worldZ}, oldState, state
     );
 
     const int chunkX = floorDivide(worldX, Chunk::WIDTH);
@@ -696,7 +696,7 @@ void World::initializeGeneratedBlockEntities(const Chunk& chunk)
 {
     const bool hasSpawner = chunk.containsBlock(BlockType::Spawner);
     const bool hasChest = chunk.containsBlock(BlockType::Chest);
-    if (!hasSpawner && !hasChest)
+    if (!chunk.containsBlockEntityState())
         return;
 
     const auto nextRandom = [](std::uint64_t& state)
@@ -722,7 +722,23 @@ void World::initializeGeneratedBlockEntities(const Chunk& chunk)
         {
             for (int y = 0; y < Chunk::HEIGHT; ++y)
             {
-                const BlockType generatedBlock = chunk.getBlock(x, y, z);
+                const mc::content::BlockState generatedState =
+                    chunk.getBlockState(x, y, z);
+                const BlockType generatedBlock = generatedState.block();
+                const BlockPosition generatedPosition{
+                    chunk.getWorldOriginX() + x,
+                    y,
+                    chunk.getWorldOriginZ() + z
+                };
+
+                if (BlockEntityStore::requiresBlockEntity(generatedState) &&
+                    generatedBlock != BlockType::Spawner &&
+                    generatedBlock != BlockType::Chest)
+                {
+                    blockEntities_.getOrCreateForState(
+                        generatedPosition, generatedState);
+                }
+
                 if (hasSpawner && generatedBlock == BlockType::Spawner)
                 {
                     const BlockPosition position{

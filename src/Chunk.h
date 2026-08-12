@@ -76,6 +76,7 @@ public:
     [[nodiscard]] int getMotionBlockingHeight(int x, int z) const;
     [[nodiscard]] bool isSectionEmpty(int sectionY) const;
     [[nodiscard]] bool containsBlock(BlockType block) const noexcept;
+    [[nodiscard]] bool containsBlockEntityState() const noexcept;
 
     [[nodiscard]] std::uint8_t getSkyLight(int x, int y, int z) const;
     [[nodiscard]] std::uint8_t getBlockLight(int x, int y, int z) const;

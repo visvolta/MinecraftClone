@@ -95,6 +95,12 @@ struct BlockBehaviour
     core::ResourceLocation lootTable{"minecraft:self"};
     std::uint8_t lightOpacity = 15;
     std::uint8_t lightEmission = 0;
+
+    bool replaceable = false;
+    bool gravityAffected = false;
+    bool randomTicks = false;
+    bool requiresSupport = false;
+    std::optional<core::ResourceLocation> blockEntityType;
 };
 
 struct BlockPropertyDefinition

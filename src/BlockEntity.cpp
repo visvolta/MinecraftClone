@@ -1,4 +1,5 @@
 #include "BlockEntity.h"
+#include "content/ContentCatalog.h"
 
 #include <algorithm>
 #include <functional>
@@ -10,6 +11,23 @@ namespace
 const mc::core::ResourceLocation FurnaceType("minecraft:furnace");
 const mc::core::ResourceLocation ChestType("minecraft:chest");
 const mc::core::ResourceLocation SpawnerType("minecraft:mob_spawner");
+
+std::optional<mc::core::ResourceLocation> blockEntityTypeForState(
+    mc::content::BlockState state)
+{
+    const mc::content::ContentCatalog* catalog =
+        mc::content::ContentCatalog::active();
+    if (catalog == nullptr)
+        return std::nullopt;
+
+    const mc::content::BlockDefinition* definition =
+        catalog->block(state);
+    if (definition == nullptr ||
+        !definition->behaviour.blockEntityType)
+        return std::nullopt;
+
+    return definition->behaviour.blockEntityType;
+}
 }
 
 std::size_t BlockPositionHash::operator()(
@@ -126,6 +144,89 @@ void SpawnerBlockEntity::loadPersistentData(
     setMobId(mob == data.integers.end() ? 0 : mob->second);
 }
 
+GenericBlockEntity::GenericBlockEntity(
+    mc::core::ResourceLocation type)
+    : type_(std::move(type))
+{
+}
+
+const mc::core::ResourceLocation&
+GenericBlockEntity::typeId() const noexcept
+{
+    return type_;
+}
+
+std::unique_ptr<BlockEntity> GenericBlockEntity::clone() const
+{
+    return std::make_unique<GenericBlockEntity>(*this);
+}
+
+BlockEntityPersistentData GenericBlockEntity::savePersistentData() const
+{
+    return data_;
+}
+
+void GenericBlockEntity::loadPersistentData(
+    const BlockEntityPersistentData& data)
+{
+    data_ = data;
+}
+
+InventoryBlockEntity::InventoryBlockEntity(
+    mc::core::ResourceLocation type,
+    std::size_t slotCount)
+    : type_(std::move(type)),
+      slots_(slotCount)
+{
+}
+
+const mc::core::ResourceLocation&
+InventoryBlockEntity::typeId() const noexcept
+{
+    return type_;
+}
+
+std::unique_ptr<BlockEntity> InventoryBlockEntity::clone() const
+{
+    return std::make_unique<InventoryBlockEntity>(*this);
+}
+
+BlockEntityPersistentData InventoryBlockEntity::savePersistentData() const
+{
+    BlockEntityPersistentData data = extra_;
+    data.items = slots_;
+    return data;
+}
+
+void InventoryBlockEntity::loadPersistentData(
+    const BlockEntityPersistentData& data)
+{
+    extra_ = data;
+    std::fill(slots_.begin(), slots_.end(), ItemStack{});
+    std::copy_n(
+        data.items.begin(),
+        std::min(data.items.size(), slots_.size()),
+        slots_.begin()
+    );
+    extra_.items.clear();
+}
+
+std::span<ItemStack> InventoryBlockEntity::containerItems() noexcept
+{
+    return slots_;
+}
+
+std::span<const ItemStack>
+InventoryBlockEntity::containerItems() const noexcept
+{
+    return slots_;
+}
+
+std::size_t InventoryBlockEntity::slotCount() const noexcept
+{
+    return slots_.size();
+}
+
 void BlockEntityTypeRegistry::registerType(
     mc::core::ResourceLocation type,
     Factory factory)
@@ -163,6 +264,7 @@ std::size_t BlockEntityTypeRegistry::size() const noexcept
 BlockEntityTypeRegistry createMinecraftBlockEntityTypes()
 {
     BlockEntityTypeRegistry types;
+
     types.registerType(FurnaceType, []
     {
         return std::make_unique<FurnaceBlockEntity>();
@@ -175,6 +277,53 @@ BlockEntityTypeRegistry createMinecraftBlockEntityTypes()
     {
         return std::make_unique<SpawnerBlockEntity>();
     });
+
+    const auto addSimple =
+        [&types](std::string_view name)
+    {
+        const mc::core::ResourceLocation type(
+            "minecraft", std::string(name));
+        types.registerType(type, [type]
+        {
+            return std::make_unique<GenericBlockEntity>(type);
+        });
+    };
+
+    const auto addInventory =
+        [&types](std::string_view name, std::size_t slots)
+    {
+        const mc::core::ResourceLocation type(
+            "minecraft", std::string(name));
+        types.registerType(type, [type, slots]
+        {
+            return std::make_unique<InventoryBlockEntity>(
+                type, slots);
+        });
+    };
+
+    addSimple("ender_chest");
+    addInventory("jukebox", 1);
+    addInventory("dispenser", 9);
+    addInventory("dropper", 9);
+    addSimple("sign");
+    addSimple("noteblock");
+    addSimple("piston");
+    addInventory("brewing_stand", 5);
+    addSimple("enchanting_table");
+    addSimple("end_portal");
+    addInventory("beacon", 1);
+    addSimple("skull");
+    addSimple("daylight_detector");
+    addInventory("hopper", 5);
+    addSimple("comparator");
+    addSimple("flower_pot");
+    addSimple("banner");
+    addSimple("structure_block");
+    addSimple("end_gateway");
+    addSimple("command_block");
+    addInventory("shulker_box", 27);
+    addSimple("bed");
+
     types.freeze();
     return types;
 }
@@ -191,23 +340,83 @@ void BlockEntityStore::onBlockChanged(
     BlockType oldBlock,
     BlockType newBlock)
 {
-    if (isFurnace(oldBlock) && isFurnace(newBlock))
-        return;
-    if (oldBlock == BlockType::Chest && newBlock == BlockType::Chest)
-        return;
-    if (oldBlock == BlockType::Spawner && newBlock == BlockType::Spawner)
+    onBlockChanged(
+        position,
+        mc::content::BlockState(oldBlock),
+        mc::content::BlockState(newBlock)
+    );
+}
+
+void BlockEntityStore::onBlockChanged(
+    const BlockPosition& position,
+    mc::content::BlockState oldState,
+    mc::content::BlockState newState)
+{
+    const auto oldType = blockEntityTypeForState(oldState);
+    const auto newType = blockEntityTypeForState(newState);
+
+    if (oldType == newType)
         return;
 
     entries_.erase(position);
-    const mc::core::ResourceLocation* type = nullptr;
-    if (isFurnace(newBlock))
-        type = &FurnaceType;
-    else if (newBlock == BlockType::Chest)
-        type = &ChestType;
-    else if (newBlock == BlockType::Spawner)
-        type = &SpawnerType;
-    if (type != nullptr)
-        entries_.emplace(position, types_.create(*type));
+    if (!newType)
+        return;
+
+    std::unique_ptr<BlockEntity> value = types_.create(*newType);
+    if (value)
+        entries_.emplace(position, std::move(value));
+}
+
+BlockEntity* BlockEntityStore::get(
+    const BlockPosition& position) noexcept
+{
+    const auto found = entries_.find(position);
+    return found == entries_.end() ? nullptr : found->second.get();
+}
+
+const BlockEntity* BlockEntityStore::get(
+    const BlockPosition& position) const noexcept
+{
+    const auto found = entries_.find(position);
+    return found == entries_.end() ? nullptr : found->second.get();
+}
+
+InventoryBlockEntity* BlockEntityStore::getInventory(
+    const BlockPosition& position) noexcept
+{
+    return dynamic_cast<InventoryBlockEntity*>(get(position));
+}
+
+const InventoryBlockEntity* BlockEntityStore::getInventory(
+    const BlockPosition& position) const noexcept
+{
+    return dynamic_cast<const InventoryBlockEntity*>(get(position));
+}
+
+BlockEntity* BlockEntityStore::getOrCreateForState(
+    const BlockPosition& position,
+    mc::content::BlockState state)
+{
+    if (BlockEntity* current = get(position))
+        return current;
+
+    const auto type = blockEntityTypeForState(state);
+    if (!type)
+        return nullptr;
+
+    std::unique_ptr<BlockEntity> value = types_.create(*type);
+    if (!value)
+        return nullptr;
+
+    BlockEntity* result = value.get();
+    entries_.insert_or_assign(position, std::move(value));
+    return result;
+}
+
+bool BlockEntityStore::requiresBlockEntity(
+    mc::content::BlockState state) noexcept
+{
+    return blockEntityTypeForState(state).has_value();
 }
 
 FurnaceBlockEntity* BlockEntityStore::getFurnace(

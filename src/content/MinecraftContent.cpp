@@ -4,6 +4,7 @@
 #include "content/resources/ResourcePack.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <optional>
@@ -257,6 +258,36 @@ BlockBehaviour behaviourFor(BlockType type)
         return "self";
     };
     behaviour.lootTable = id(lootName(behaviour.dropRule));
+
+    behaviour.replaceable =
+        type == BlockType::Air || isLiquid(type) || isPlant(type) ||
+        type == BlockType::Snow || type == BlockType::Vine;
+    behaviour.gravityAffected =
+        type == BlockType::Sand || type == BlockType::Gravel;
+    behaviour.randomTicks =
+        type == BlockType::Grass || type == BlockType::Mycelium ||
+        isLeaf(type) || isCrop(type) || type == BlockType::Cactus ||
+        type == BlockType::SugarCane || type == BlockType::Ice ||
+        type == BlockType::Snow;
+    behaviour.requiresSupport =
+        isPlant(type) || isLadder(type) ||
+        type == BlockType::RedstoneWire ||
+        type == BlockType::RedstoneTorch ||
+        type == BlockType::Lever || type == BlockType::Repeater;
+
+    if (type == BlockType::Lava)
+    {
+        behaviour.traits.translucent = false;
+        behaviour.traits.opaque = false;
+    }
+
+    if (isFurnace(type))
+        behaviour.blockEntityType = id("furnace");
+    else if (type == BlockType::Chest)
+        behaviour.blockEntityType = id("chest");
+    else if (type == BlockType::Spawner)
+        behaviour.blockEntityType = id("mob_spawner");
+
     return behaviour;
 }
 
@@ -268,8 +299,10 @@ void addBlock(
     BlockTextures textures = {})
 {
     const core::ResourceLocation name = id(registryPath);
-    const RenderLayer renderLayer = isLiquid(legacyType) ||
-            isTranslucent(legacyType)
+    const RenderLayer renderLayer =
+        legacyType == BlockType::Water ||
+        legacyType == BlockType::Glass ||
+        legacyType == BlockType::Ice
         ? RenderLayer::Translucent
         : (isLeaf(legacyType)
             ? RenderLayer::CutoutMipped
@@ -356,6 +389,49 @@ bool endsWith(std::string_view value, std::string_view suffix)
 bool equalsAny(std::string_view value, std::initializer_list<std::string_view> terms)
 {
     return std::find(terms.begin(), terms.end(), value) != terms.end();
+}
+
+std::optional<core::ResourceLocation> blockEntityTypeForBlock(
+    std::string_view name)
+{
+    if (name == "furnace" || name == "lit_furnace")
+        return id("furnace");
+    if (name == "chest" || name == "trapped_chest")
+        return id("chest");
+    if (name == "ender_chest") return id("ender_chest");
+    if (name == "jukebox") return id("jukebox");
+    if (name == "dispenser") return id("dispenser");
+    if (name == "dropper") return id("dropper");
+    if (name == "standing_sign" || name == "wall_sign")
+        return id("sign");
+    if (name == "mob_spawner") return id("mob_spawner");
+    if (name == "noteblock") return id("noteblock");
+    if (name == "piston_extension") return id("piston");
+    if (name == "brewing_stand") return id("brewing_stand");
+    if (name == "enchanting_table") return id("enchanting_table");
+    if (name == "end_portal") return id("end_portal");
+    if (name == "beacon") return id("beacon");
+    if (name == "skull") return id("skull");
+    if (name == "daylight_detector" ||
+        name == "daylight_detector_inverted")
+        return id("daylight_detector");
+    if (name == "hopper") return id("hopper");
+    if (name == "unpowered_comparator" ||
+        name == "powered_comparator")
+        return id("comparator");
+    if (name == "flower_pot") return id("flower_pot");
+    if (name == "standing_banner" || name == "wall_banner")
+        return id("banner");
+    if (name == "structure_block") return id("structure_block");
+    if (name == "end_gateway") return id("end_gateway");
+    if (name == "command_block" ||
+        name == "chain_command_block" ||
+        name == "repeating_command_block")
+        return id("command_block");
+    if (endsWith(name, "_shulker_box"))
+        return id("shulker_box");
+    if (name == "bed") return id("bed");
+    return std::nullopt;
 }
 
 BlockBehaviour resourceBehaviour(std::string_view name)
@@ -479,6 +555,23 @@ BlockBehaviour resourceBehaviour(std::string_view name)
         behaviour.lightEmission = name.find("redstone") != std::string_view::npos ? 7 : 15;
     if (containsAny(name, {"bedrock", "barrier", "command_block", "structure_block"}))
         behaviour.dropRule = BlockDropRule::None;
+
+    behaviour.replaceable =
+        plant || portal || name == "air" || name == "snow_layer" ||
+        name == "vine" || name == "water" || name == "flowing_water" ||
+        name == "lava" || name == "flowing_lava";
+    behaviour.gravityAffected =
+        name == "sand" || name == "gravel" || name == "anvil" ||
+        endsWith(name, "_concrete_powder");
+    behaviour.randomTicks =
+        plant || leaves || name == "grass" || name == "mycelium" ||
+        name == "ice" || name == "snow_layer" || name == "fire" ||
+        name == "cactus" || name == "reeds";
+    behaviour.requiresSupport =
+        plant || rail || component || name == "snow_layer" ||
+        name == "cactus" || name == "reeds";
+    behaviour.blockEntityType = blockEntityTypeForBlock(name);
+
     return behaviour;
 }
 
@@ -862,9 +955,39 @@ void registerMinecraftContent(
     addItem(catalog, ItemType::Lead, "lead", "Lead");
 
     catalog.registerEntityType(id("item"), {"Dropped Item"});
-    catalog.registerBlockEntityType(id("furnace"), {"Furnace", 1});
-    catalog.registerBlockEntityType(id("chest"), {"Chest", 1});
-    catalog.registerBlockEntityType(id("mob_spawner"), {"Mob Spawner", 1});
+
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 25>
+        vanillaBlockEntities{{
+            {"furnace", "Furnace"},
+            {"chest", "Chest"},
+            {"ender_chest", "Ender Chest"},
+            {"jukebox", "Jukebox"},
+            {"dispenser", "Dispenser"},
+            {"dropper", "Dropper"},
+            {"sign", "Sign"},
+            {"mob_spawner", "Mob Spawner"},
+            {"noteblock", "Note Block"},
+            {"piston", "Piston"},
+            {"brewing_stand", "Brewing Stand"},
+            {"enchanting_table", "Enchanting Table"},
+            {"end_portal", "End Portal"},
+            {"beacon", "Beacon"},
+            {"skull", "Skull"},
+            {"daylight_detector", "Daylight Detector"},
+            {"hopper", "Hopper"},
+            {"comparator", "Comparator"},
+            {"flower_pot", "Flower Pot"},
+            {"banner", "Banner"},
+            {"structure_block", "Structure Block"},
+            {"end_gateway", "End Gateway"},
+            {"command_block", "Command Block"},
+            {"shulker_box", "Shulker Box"},
+            {"bed", "Bed"}
+        }};
+
+    for (const auto& [name, display] : vanillaBlockEntities)
+        catalog.registerBlockEntityType(
+            id(name), {std::string(display), 1});
 
     registerResourceContent(catalog, assetRoot);
     registerStructureCompatibilityBlocks(catalog);

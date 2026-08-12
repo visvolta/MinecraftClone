@@ -198,6 +198,31 @@ bool Chunk::containsBlock(BlockType block) const noexcept
     return false;
 }
 
+bool Chunk::containsBlockEntityState() const noexcept
+{
+    const mc::content::ContentCatalog* catalog =
+        mc::content::ContentCatalog::active();
+
+    if (catalog == nullptr)
+        return containsBlock(BlockType::Furnace) ||
+               containsBlock(BlockType::LitFurnace) ||
+               containsBlock(BlockType::Chest) ||
+               containsBlock(BlockType::Spawner);
+
+    for (const auto& section : sections_)
+    {
+        for (const mc::content::BlockState state : section.palette())
+        {
+            const mc::content::BlockDefinition* definition =
+                catalog->block(state);
+            if (definition != nullptr &&
+                definition->behaviour.blockEntityType)
+                return true;
+        }
+    }
+    return false;
+}
+
 int Chunk::getChunkX() const { return chunkX; }
 int Chunk::getChunkZ() const { return chunkZ; }
 int Chunk::getWorldOriginX() const { return chunkX * WIDTH; }

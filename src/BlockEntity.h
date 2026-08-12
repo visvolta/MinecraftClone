@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Block.h"
+#include "content/BlockState.h"
 #include "BlockEntityBase.h"
 #include "Furnace.h"
 
@@ -61,6 +62,43 @@ private:
     int mobId_ = 0;
 };
 
+class GenericBlockEntity final : public BlockEntity
+{
+public:
+    explicit GenericBlockEntity(mc::core::ResourceLocation type);
+
+    [[nodiscard]] const mc::core::ResourceLocation& typeId() const noexcept override;
+    [[nodiscard]] std::unique_ptr<BlockEntity> clone() const override;
+    [[nodiscard]] BlockEntityPersistentData savePersistentData() const override;
+    void loadPersistentData(const BlockEntityPersistentData& data) override;
+
+private:
+    mc::core::ResourceLocation type_;
+    BlockEntityPersistentData data_;
+};
+
+class InventoryBlockEntity final : public BlockEntity
+{
+public:
+    InventoryBlockEntity(
+        mc::core::ResourceLocation type,
+        std::size_t slotCount
+    );
+
+    [[nodiscard]] const mc::core::ResourceLocation& typeId() const noexcept override;
+    [[nodiscard]] std::unique_ptr<BlockEntity> clone() const override;
+    [[nodiscard]] BlockEntityPersistentData savePersistentData() const override;
+    void loadPersistentData(const BlockEntityPersistentData& data) override;
+    [[nodiscard]] std::span<ItemStack> containerItems() noexcept override;
+    [[nodiscard]] std::span<const ItemStack> containerItems() const noexcept override;
+    [[nodiscard]] std::size_t slotCount() const noexcept;
+
+private:
+    mc::core::ResourceLocation type_;
+    std::vector<ItemStack> slots_;
+    BlockEntityPersistentData extra_;
+};
+
 struct BlockEntityRecord
 {
     BlockPosition position;
@@ -104,6 +142,31 @@ public:
         BlockType oldBlock,
         BlockType newBlock
     );
+    void onBlockChanged(
+        const BlockPosition& position,
+        mc::content::BlockState oldState,
+        mc::content::BlockState newState
+    );
+
+    [[nodiscard]] BlockEntity* get(
+        const BlockPosition& position
+    ) noexcept;
+    [[nodiscard]] const BlockEntity* get(
+        const BlockPosition& position
+    ) const noexcept;
+    [[nodiscard]] InventoryBlockEntity* getInventory(
+        const BlockPosition& position
+    ) noexcept;
+    [[nodiscard]] const InventoryBlockEntity* getInventory(
+        const BlockPosition& position
+    ) const noexcept;
+    [[nodiscard]] BlockEntity* getOrCreateForState(
+        const BlockPosition& position,
+        mc::content::BlockState state
+    );
+    [[nodiscard]] static bool requiresBlockEntity(
+        mc::content::BlockState state
+    ) noexcept;
 
     [[nodiscard]] FurnaceBlockEntity* getFurnace(
         const BlockPosition& position

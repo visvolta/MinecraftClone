@@ -3,6 +3,7 @@
 #include "entity/ai/Goal.h"
 #include "entity/navigation/PathNavigation.h"
 #include "entity/CombatRules.h"
+#include "entity/Math.h"
 #include "entity/attributes/AttributeMap.h"
 #include "entity/attributes/AttributeModifier.h"
 #include "entity/attributes/SharedMonsterAttributes.h"
@@ -15,6 +16,7 @@
 #include <cassert>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 namespace
 {

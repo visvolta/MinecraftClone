@@ -52,7 +52,9 @@ public:
     int componentType=0;
     std::optional<Facing> facing;
 
-    virtual void build(std::vector<std::unique_ptr<Piece>>& pieces,JavaRandom& random){}
+    virtual void build(
+        [[maybe_unused]] std::vector<std::unique_ptr<Piece>>& pieces,
+        [[maybe_unused]] JavaRandom& random){}
     virtual bool place(WorldGenerationContext& context,JavaRandom& random,const Box& clip)=0;
     virtual void offset(int x,int y,int z){box.offset(x,y,z);}
 

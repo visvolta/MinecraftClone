@@ -13,29 +13,42 @@ void BodyHelper::updateRenderAngles()
 {
     const double dx = owner_->posX - owner_->prevPosX;
     const double dz = owner_->posZ - owner_->prevPosZ;
+
     if (dx * dx + dz * dz > 2.500000277905201e-7)
     {
-        owner_->renderYawOffset = toDegrees(
-            static_cast<float>(std::atan2(dz, dx))) - 90.0f;
-        owner_->rotationYawHead = owner_->renderYawOffset;
+        // Vanilla: body follows rotationYaw (move-helper facing), then the
+        // head is clamped to stay within 75 degrees of the body. Using the
+        // noisy position delta here made idle gravity jitter spin the model.
+        owner_->renderYawOffset = owner_->rotationYaw;
+        owner_->rotationYawHead = computeAngleWithBound(
+            owner_->renderYawOffset, owner_->rotationYawHead, 75.0f);
+        prevRenderYawHead_ = owner_->rotationYawHead;
         rotationTick_ = 0;
+        return;
+    }
+
+    if (owner_->isBeingRidden() &&
+        owner_->getControllingPassenger() != nullptr &&
+        owner_->getControllingPassenger()->entityKind() == EntityKind::Living)
+        return;
+
+    float max = 75.0f;
+    if (std::abs(owner_->rotationYawHead - prevRenderYawHead_) > 15.0f)
+    {
+        rotationTick_ = 0;
+        prevRenderYawHead_ = owner_->rotationYawHead;
     }
     else
     {
-        float max = 75.0f;
-        if (std::abs(owner_->rotationYawHead - prevRenderYawHead_) > 15.0f)
+        ++rotationTick_;
+        if (rotationTick_ > 10)
         {
-            rotationTick_ = 0;
-            prevRenderYawHead_ = owner_->rotationYawHead;
+            max = std::max(
+                1.0f - static_cast<float>(rotationTick_ - 10) / 10.0f,
+                0.0f) * 75.0f;
         }
-        else
-        {
-            ++rotationTick_;
-            if (rotationTick_ > 10)
-                max = std::max(1.0f - static_cast<float>(rotationTick_ - 10) / 10.0f, 0.0f) * 75.0f;
-        }
-        owner_->renderYawOffset = approachDegrees(
-            owner_->renderYawOffset, owner_->rotationYawHead, max);
     }
+    owner_->renderYawOffset = computeAngleWithBound(
+        owner_->rotationYawHead, owner_->renderYawOffset, max);
 }
 }

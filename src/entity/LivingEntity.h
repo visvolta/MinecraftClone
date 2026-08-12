@@ -18,6 +18,7 @@ public:
     explicit LivingEntity(World& world);
 
     void onUpdate() override;
+    void onEntityUpdate() override;
     virtual void onLivingUpdate();
     void travel(float strafe, float vertical, float forward);
     bool attackEntityFrom(const DamageSource& source, float amount) override;
@@ -61,8 +62,9 @@ public:
     [[nodiscard]] bool isJumping() const noexcept { return isJumping_; }
     void setMoveForward(float value) noexcept { moveForward = value; }
     void setMoveStrafing(float value) noexcept { moveStrafing = value; }
-    void setAIMoveSpeed(float speed) noexcept { landMovementFactor_ = speed; }
+    virtual void setAIMoveSpeed(float speed) noexcept { landMovementFactor_ = speed; }
     [[nodiscard]] float getAIMoveSpeed() const noexcept { return landMovementFactor_; }
+    [[nodiscard]] int getIdleTime() const noexcept { return idleTime_; }
 
     [[nodiscard]] bool isOnLadder() const;
     [[nodiscard]] virtual bool isChild() const { return false; }
@@ -109,6 +111,9 @@ public:
     int maxHurtResistantTime = 20;
     float attackedAtYaw = 0.0f;
 
+    virtual void clearDeadEntityReferences(const Entity* removed);
+    [[nodiscard]] virtual float getBrightness() const;
+    [[nodiscard]] virtual float getRenderBrightness() const;
     [[nodiscard]] virtual int getExperiencePoints(PlayerEntity* player) const;
     [[nodiscard]] virtual core::ResourceLocation getLootTable() const;
 
@@ -129,6 +134,8 @@ protected:
     [[nodiscard]] virtual float getJumpUpwardsMotion() const noexcept { return 0.42f; }
     virtual void updateArmSwingProgress();
     virtual void updateEntityActionState() {}
+    virtual void updateRenderYawOffset();
+    void wrapRenderAngles();
     virtual void collideWithNearbyEntities();
     virtual void collideWithEntity(Entity& entity);
     [[nodiscard]] virtual int getArmSwingAnimationEnd() const noexcept { return 6; }

@@ -66,10 +66,11 @@ void appendQuad(
     glm::vec3 normal = glm::cross(edgeOne, edgeTwo);
     if (glm::dot(normal, normal) > 0.0000001f)
         normal = glm::normalize(normal);
+    // Match block face shading (top 1.0, sides 0.8). World light is applied
+    // as a uniform from the entity sample location, like vanilla lightmap.
     const float light = std::clamp(
-        0.6f + std::max(0.0f, normal.y) * 0.4f +
-        std::abs(normal.z) * 0.08f,
-        0.55f, 1.0f
+        0.8f + std::max(0.0f, normal.y) * 0.2f,
+        0.8f, 1.0f
     );
     const glm::vec3 colour(light);
     const float u0 = quad.u0 / static_cast<float>(textureWidth);
@@ -228,6 +229,7 @@ void MobEntityRenderer::draw(
     shader_->setMat4("view",view);
     shader_->setMat4("projection",projection);
     shader_->setFloat("daylightBrightness",atmosphere.daylightBrightness);
+    shader_->setFloat("entityLight",1.0f);
     shader_->setInt("fogMode",static_cast<int>(atmosphere.fogMode));
     shader_->setVec3("fogColour",atmosphere.fogColour);
     shader_->setFloat("fogStart",atmosphere.fogStart);
@@ -284,6 +286,7 @@ void MobEntityRenderer::draw(
             ));
         }
         shader_->setMat4("model",transform);
+        shader_->setFloat("entityLight", entity.getRenderBrightness());
         const glm::vec3 hurtTint = glm::mix(
             glm::vec3(1.0f), glm::vec3(1.0f,0.35f,0.35f),
             animation.hurtProgress

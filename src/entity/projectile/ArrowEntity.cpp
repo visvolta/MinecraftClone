@@ -49,8 +49,12 @@ void SnowballEntity::onHitEntity(LivingEntity& entity)
     setDead();
 }
 
-ThrownPotionEntity::ThrownPotionEntity(World& world, LivingEntity* shooter)
-    : ProjectileEntity(world, shooter)
+ThrownPotionEntity::ThrownPotionEntity(
+    World& world,
+    LivingEntity* shooter,
+    SplashPotionType type)
+    : ProjectileEntity(world, shooter),
+      type_(type)
 {
     damage_ = 0.0f;
 }
@@ -60,28 +64,62 @@ core::ResourceLocation ThrownPotionEntity::getType() const
     return core::ResourceLocation("minecraft:potion");
 }
 
-void ThrownPotionEntity::onHitEntity(LivingEntity& entity)
+void ThrownPotionEntity::applyTo(LivingEntity& entity, double intensity)
 {
-    entity.addPotionEffect({gameplay::StatusEffectType::Slowness, 180, 0});
-    entity.addPotionEffect({gameplay::StatusEffectType::Poison, 100, 0});
-    setDead();
+    if (intensity <= 0.0)
+        return;
+    switch (type_)
+    {
+        case SplashPotionType::Harming:
+            entity.attackEntityFrom(
+                DamageSource::causeIndirectMagicDamage(*this, shooter_),
+                static_cast<float>(6.0 * intensity));
+            break;
+        case SplashPotionType::Slowness:
+        {
+            const int duration = static_cast<int>(intensity * 1800.0 + 0.5);
+            if (duration > 20)
+                entity.addPotionEffect(
+                    {gameplay::StatusEffectType::Slowness, duration, 0});
+            break;
+        }
+        case SplashPotionType::Poison:
+        {
+            const int duration = static_cast<int>(intensity * 900.0 + 0.5);
+            if (duration > 20)
+                entity.addPotionEffect(
+                    {gameplay::StatusEffectType::Poison, duration, 0});
+            break;
+        }
+        case SplashPotionType::Weakness:
+        {
+            const int duration = static_cast<int>(intensity * 1800.0 + 0.5);
+            if (duration > 20)
+                entity.addPotionEffect(
+                    {gameplay::StatusEffectType::Weakness, duration, 0});
+            break;
+        }
+    }
+}
+
+void ThrownPotionEntity::onHitEntity(LivingEntity&)
+{
+    onHitBlock(0, 0, 0);
 }
 
 void ThrownPotionEntity::onHitBlock(int, int, int)
 {
-    for (Entity* other : world_->getEntitiesInAABB(
-             getEntityBoundingBox().grow(4.0, 2.0, 4.0), this))
+    const AxisAlignedBB area = getEntityBoundingBox().grow(4.0, 2.0, 4.0);
+    for (Entity* other : world_->getEntitiesInAABB(area, this))
     {
-        if (auto* living = dynamic_cast<LivingEntity*>(other))
-        {
-            if (getDistanceSq(*living) < 16.0)
-            {
-                living->addPotionEffect(
-                    {gameplay::StatusEffectType::Slowness, 180, 0});
-                living->addPotionEffect(
-                    {gameplay::StatusEffectType::Poison, 100, 0});
-            }
-        }
+        auto* living = dynamic_cast<LivingEntity*>(other);
+        if (!living || living->isDead())
+            continue;
+        const double distSq = getDistanceSq(*living);
+        if (distSq >= 16.0)
+            continue;
+        double intensity = 1.0 - std::sqrt(distSq) / 4.0;
+        applyTo(*living, intensity);
     }
     setDead();
 }

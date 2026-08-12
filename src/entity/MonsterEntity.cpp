@@ -37,12 +37,10 @@ bool MonsterEntity::isValidLightLevel()
     const int x = floorInt(posX);
     const int y = floorInt(boundingBox_.minY);
     const int z = floorInt(posZ);
-    if (world_->getSkyLightLevel(x, y, z) > rand_.nextInt(32))
-        return false;
-    int light = std::max(
-        world_->getBlockLightLevel(x, y, z),
-        world_->getSkyLightLevel(x, y, z));
-    return light <= rand_.nextInt(8);
+    const int sky = world_->getEffectiveSkyLight(x, y, z);
+    const int neighbor = world_->getLightFromNeighbors(x, y, z);
+    return vanillaHostileLightAllowsSpawn(
+        sky, neighbor, rand_.nextInt(32), rand_.nextInt(8));
 }
 
 bool MonsterEntity::getCanSpawnHere()

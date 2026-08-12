@@ -44,6 +44,8 @@ public:
     {
         return attackTarget_;
     }
+    void setAIMoveSpeed(float speed) noexcept override;
+    void clearDeadEntityReferences(const Entity* removed) override;
 
     virtual bool attackEntityAsMob(Entity& target);
     virtual void eatGrassBonus() {}
@@ -82,8 +84,8 @@ public:
     }
     [[nodiscard]] float getPathPriority(navigation::PathNodeType type) const;
     void setPathPriority(navigation::PathNodeType type, float value);
-    [[nodiscard]] float getBlockPathWeight(int x, int y, int z) const;
-    [[nodiscard]] float getBrightness() const;
+    [[nodiscard]] virtual float getBlockPathWeight(int x, int y, int z) const;
+    [[nodiscard]] float getBrightness() const override;
 
     void enablePersistence() noexcept { persistenceRequired_ = true; }
     void faceEntity(Entity& entity, float maxYaw, float maxPitch);
@@ -112,6 +114,7 @@ public:
 protected:
     virtual void initEntityAI() {}
     virtual void applyEntityAttributes();
+    void updateRenderYawOffset() override;
     void despawnEntity();
     void updateLeashedState();
     [[nodiscard]] virtual navigation::NavigationSettings createNavigationSettings() const;

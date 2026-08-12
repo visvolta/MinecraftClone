@@ -78,10 +78,10 @@ void MoveHelper::onUpdateMoveHelper()
         }
         const float yaw = toDegrees(static_cast<float>(std::atan2(dz, dx))) - 90.0f;
         owner_->rotationYaw = limitAngle(owner_->rotationYaw, yaw, 90.0f);
+        // EntityLiving.setAIMoveSpeed also writes moveForward to the speed.
         owner_->setAIMoveSpeed(static_cast<float>(
             speed_ * owner_->getEntityAttribute(
                 SharedMonsterAttributes::MOVEMENT_SPEED).getAttributeValue()));
-        owner_->setMoveForward(1.0f);
         if (dy > owner_->stepHeight &&
             dx * dx + dz * dz < static_cast<double>(std::max(1.0f, owner_->getWidth())))
         {

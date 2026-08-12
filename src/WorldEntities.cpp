@@ -2,9 +2,11 @@
 
 #include "AssetPaths.h"
 #include "BlockShape.h"
+#include "ChunkMeshing.h"
 #include "content/ContentCatalog.h"
 #include "content/resources/ResourcePack.h"
 #include "entity/Entity.h"
+#include "entity/LivingEntity.h"
 #include "entity/Mob.h"
 #include "entity/PlayerEntity.h"
 #include "entity/item/ItemEntityEntity.h"
@@ -13,7 +15,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <random>
+#include <unordered_set>
 
 void World::setPlayer(mc::entity::PlayerEntity* player) noexcept
 {
@@ -31,26 +35,73 @@ mc::entity::Entity* World::spawnEntity(
     if (!entity)
         return nullptr;
     mc::entity::Entity* raw = entity.get();
-    entities_.push_back(std::move(entity));
+    if (tickingEntities_)
+        pendingEntities_.push_back(std::move(entity));
+    else
+        entities_.push_back(std::move(entity));
     return raw;
+}
+
+void World::flushPendingEntities()
+{
+    for (auto& pending : pendingEntities_)
+    {
+        if (pending)
+            entities_.push_back(std::move(pending));
+    }
+    pendingEntities_.clear();
+}
+
+void World::clearDeadEntityReferences()
+{
+    std::unordered_set<const mc::entity::Entity*> dead;
+    dead.reserve(entities_.size());
+    for (const auto& entity : entities_)
+    {
+        if (!entity || entity->isDead())
+            dead.insert(entity.get());
+    }
+    if (dead.empty())
+        return;
+
+    auto clearOne = [&](mc::entity::Entity* entity)
+    {
+        if (entity == nullptr)
+            return;
+        if (auto* living = dynamic_cast<mc::entity::LivingEntity*>(entity))
+        {
+            for (const mc::entity::Entity* removed : dead)
+                living->clearDeadEntityReferences(removed);
+        }
+    };
+
+    for (auto& entity : entities_)
+        clearOne(entity.get());
+    clearOne(player_);
 }
 
 void World::tickEntities()
 {
+    tickingEntities_ = true;
     if (player_)
     {
-        for (auto& entity : entities_)
+        for (std::size_t index = 0; index < entities_.size(); ++index)
         {
+            mc::entity::Entity* entity = entities_[index].get();
             if (entity && !entity->isDead())
                 entity->onCollideWithPlayer(*player_);
         }
     }
-    for (auto& entity : entities_)
+    for (std::size_t index = 0; index < entities_.size(); ++index)
     {
+        mc::entity::Entity* entity = entities_[index].get();
         if (!entity || entity->isDead())
             continue;
         entity->onUpdate();
     }
+    tickingEntities_ = false;
+    flushPendingEntities();
+    clearDeadEntityReferences();
     std::erase_if(entities_, [](const std::unique_ptr<mc::entity::Entity>& e)
     {
         return !e || e->isDead();
@@ -151,14 +202,76 @@ std::vector<mc::entity::AxisAlignedBB> World::getCollisionBoxes(
 
 bool World::canSeeSky(int x, int y, int z) const
 {
-    return getSkyLightLevel(x, y, z) >= 15;
+    const int top = getHighestSolidBlockY(x, z);
+    if (top < 0)
+        return getSkyLightLevel(x, y, z) >= 15;
+    return y > top;
+}
+
+int World::getEffectiveSkyLight(int x, int y, int z) const
+{
+    const int stored = getSkyLightLevel(x, y, z);
+    if (stored == 0 && canSeeSky(x, y, z))
+        return 15;
+    return stored;
+}
+
+int World::calculateSkylightSubtracted() const
+{
+    constexpr float pi = std::numbers::pi_v<float>;
+    const int dayTime = static_cast<int>(worldTime_ % 24000U);
+    float angle = static_cast<float>(dayTime) / 24000.0f - 0.25f;
+    if (angle < 0.0f)
+        angle += 1.0f;
+    if (angle > 1.0f)
+        angle -= 1.0f;
+    const float original = angle;
+    angle = 1.0f - (std::cos(angle * pi) + 1.0f) / 2.0f;
+    const float celestial = original + (angle - original) / 3.0f;
+    const float dayFactor = std::clamp(
+        std::cos(celestial * pi * 2.0f) * 2.0f + 0.5f,
+        0.0f,
+        1.0f);
+    return static_cast<int>((1.0f - dayFactor) * 11.0f);
+}
+
+int World::getLightFromNeighbors(int x, int y, int z) const
+{
+    const int sky = std::max(
+        0, getEffectiveSkyLight(x, y, z) - calculateSkylightSubtracted());
+    const int block = getBlockLightLevel(x, y, z);
+    return std::max(sky, block);
 }
 
 float World::getLightBrightness(int x, int y, int z) const
 {
-    const int sky = getSkyLightLevel(x, y, z);
-    const int block = getBlockLightLevel(x, y, z);
-    return static_cast<float>(std::max(sky, block)) / 15.0f;
+    return ChunkMeshing::classicBrightness(getLightFromNeighbors(x, y, z));
+}
+
+float World::getRenderLightBrightness(int x, int y, int z) const
+{
+    const int light = std::max(
+        getEffectiveSkyLight(x, y, z), getBlockLightLevel(x, y, z));
+    return ChunkMeshing::classicBrightness(light);
+}
+
+bool World::containsEntity(const mc::entity::Entity* entity) const
+{
+    if (entity == nullptr)
+        return false;
+    if (player_ == entity)
+        return true;
+    for (const auto& candidate : entities_)
+    {
+        if (candidate.get() == entity)
+            return true;
+    }
+    for (const auto& candidate : pendingEntities_)
+    {
+        if (candidate.get() == entity)
+            return true;
+    }
+    return false;
 }
 
 bool World::isDaytime() const

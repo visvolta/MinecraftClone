@@ -123,24 +123,48 @@ void PanicGoal::start(GoalContext&)
         16.0f);
 }
 
-WanderAvoidWaterGoal::WanderAvoidWaterGoal(Mob& mob, double speed, float chance)
-    : mob_(&mob), speed_(speed), chance_(chance)
+WanderAvoidWaterGoal::WanderAvoidWaterGoal(
+    Mob& mob, double speed, float probability)
+    : mob_(&mob), speed_(speed), probability_(probability)
 {
     setMutexBits(1);
 }
 
 bool WanderAvoidWaterGoal::shouldExecute(GoalContext&)
 {
-    if (mob_->getRNG().nextFloat() >= chance_)
-        return false;
-    if (const auto target = findRandomTarget(*mob_, 10, 7, nullptr, true))
+    if (!mustUpdate_)
     {
-        targetX_ = target->x;
-        targetY_ = target->y;
-        targetZ_ = target->z;
-        return true;
+        // EntityAIWander: do not start a new stroll after 100 idle ticks,
+        // and only roll nextInt(120) otherwise.
+        if (mob_->getIdleTime() >= 100)
+            return false;
+        if (mob_->getRNG().nextInt(executionChance_) != 0)
+            return false;
     }
-    return false;
+
+    std::optional<glm::dvec3> target;
+    if (mob_->isInWater())
+    {
+        target = findRandomTarget(*mob_, 15, 7, nullptr, true);
+        if (!target)
+            target = findRandomTarget(*mob_, 10, 7, nullptr, false);
+    }
+    else if (mob_->getRNG().nextFloat() >= probability_)
+    {
+        target = findRandomTarget(*mob_, 10, 7, nullptr, true);
+    }
+    else
+    {
+        target = findRandomTarget(*mob_, 10, 7, nullptr, false);
+    }
+
+    if (!target)
+        return false;
+    targetX_ = target->x;
+    targetY_ = target->y;
+    targetZ_ = target->z;
+    mustUpdate_ = false;
+    return true;
 }
 
 bool WanderAvoidWaterGoal::shouldContinue(GoalContext&)

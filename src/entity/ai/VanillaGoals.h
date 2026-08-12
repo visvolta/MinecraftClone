@@ -59,15 +59,18 @@ private:
 class WanderAvoidWaterGoal final : public Goal
 {
 public:
-    WanderAvoidWaterGoal(Mob& mob, double speed, float chance = 0.001f);
+    WanderAvoidWaterGoal(Mob& mob, double speed, float probability = 0.001f);
     bool shouldExecute(GoalContext&) override;
     bool shouldContinue(GoalContext&) override;
     void start(GoalContext&) override;
+    void makeUpdate() noexcept { mustUpdate_ = true; }
 
 private:
     Mob* mob_ = nullptr;
     double speed_ = 1.0;
-    float chance_ = 0.001f;
+    float probability_ = 0.001f;
+    int executionChance_ = 120;
+    bool mustUpdate_ = false;
     double targetX_ = 0.0;
     double targetY_ = 0.0;
     double targetZ_ = 0.0;

@@ -9,8 +9,8 @@ class AgeableEntity : public Creature
 public:
     explicit AgeableEntity(World& world);
 
-    void onLivingUpdate();
-    [[nodiscard]] bool isChild() const;
+    void onLivingUpdate() override;
+    [[nodiscard]] bool isChild() const override;
     void setGrowingAge(int age);
     [[nodiscard]] int getGrowingAge() const noexcept { return growingAge_; }
     void addGrowth(int seconds);

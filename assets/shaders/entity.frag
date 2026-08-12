@@ -6,6 +6,7 @@ out vec4 fragmentColour;
 uniform sampler2D entityTexture;
 uniform vec3 entityTint;
 uniform float daylightBrightness;
+uniform float entityLight;
 uniform int fogMode;
 uniform vec3 fogColour;
 uniform float fogStart;
@@ -15,7 +16,7 @@ void main()
 {
     vec4 texel = texture(entityTexture, vUv);
     if (texel.a < 0.1) discard;
-    vec3 colour = texel.rgb * entityTint * vColour * daylightBrightness;
+    vec3 colour = texel.rgb * entityTint * vColour * entityLight * daylightBrightness;
     float fog = fogMode == 0
         ? clamp((fogEnd - vDistance) / max(0.001, fogEnd - fogStart), 0.0, 1.0)
         : clamp(exp(-fogDensity * fogDensity * vDistance * vDistance), 0.0, 1.0);

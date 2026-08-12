@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <limits>
 #include <queue>
 #include <stdexcept>
@@ -274,14 +275,20 @@ std::optional<Path> PathFinder::findPath(
             --startPosition.y;
     }
 
-    PointMap points;
-    points.reserve(256);
-    auto point = [&points](const glm::ivec3& position) -> SearchPoint&
+    // SearchPoint pointers are stored in the open set. An unordered_map of
+    // values rehashes and invalidates those pointers once it grows past its
+    // reserved bucket count — that was a render-distance-scaled crash.
+    std::deque<SearchPoint> storage;
+    std::unordered_map<glm::ivec3, SearchPoint*, PositionHash> points;
+    points.reserve(1024);
+    auto point = [&storage, &points](const glm::ivec3& position) -> SearchPoint&
     {
-        const auto [iterator, inserted] = points.try_emplace(position);
-        if (inserted)
-            iterator->second.position = position;
-        return iterator->second;
+        if (const auto found = points.find(position); found != points.end())
+            return *found->second;
+        storage.push_back({});
+        storage.back().position = position;
+        points.emplace(position, &storage.back());
+        return storage.back();
     };
 
     SearchPoint& startPoint = point(startPosition);
@@ -631,6 +638,15 @@ void PathNavigation::tick(
 bool PathNavigation::noPath() const noexcept
 {
     return (!path_ || path_->finished()) && !hasClimbingTarget_;
+}
+
+std::optional<glm::vec3> PathNavigation::currentMoveTarget() const noexcept
+{
+    if (path_ && !path_->finished())
+        return path_->positionFor(path_->currentIndex(), settings_.width);
+    if (hasClimbingTarget_)
+        return climbingTarget_;
+    return std::nullopt;
 }
 
 const Path* PathNavigation::path() const noexcept

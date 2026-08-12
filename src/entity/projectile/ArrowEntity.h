@@ -25,15 +25,31 @@ protected:
     void onHitEntity(LivingEntity& entity) override;
 };
 
+enum class SplashPotionType
+{
+    Harming,
+    Slowness,
+    Poison,
+    Weakness
+};
+
 class ThrownPotionEntity : public ProjectileEntity
 {
 public:
-    ThrownPotionEntity(World& world, LivingEntity* shooter);
+    ThrownPotionEntity(
+        World& world,
+        LivingEntity* shooter,
+        SplashPotionType type = SplashPotionType::Harming);
     [[nodiscard]] core::ResourceLocation getType() const override;
+    [[nodiscard]] SplashPotionType potionType() const noexcept { return type_; }
 
 protected:
     void onHitEntity(LivingEntity& entity) override;
     void onHitBlock(int x, int y, int z) override;
+
+private:
+    void applyTo(LivingEntity& entity, double intensity);
+    SplashPotionType type_ = SplashPotionType::Harming;
 };
 
 class LlamaSpitEntity : public ProjectileEntity

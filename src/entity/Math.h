@@ -44,4 +44,42 @@ namespace mc::entity
     delta = std::clamp(delta, -maxChange, maxChange);
     return current + delta;
 }
+
+// EntityBodyHelper.computeAngleWithBound: return angle2 moved just far
+// enough that |angle1 - result| <= maxDelta.
+[[nodiscard]] inline float computeAngleWithBound(
+    float angle1,
+    float angle2,
+    float maxDelta) noexcept
+{
+    float delta = wrapDegrees(angle1 - angle2);
+    if (delta < -maxDelta)
+        delta = -maxDelta;
+    if (delta >= maxDelta)
+        delta = maxDelta;
+    return angle1 - delta;
+}
+
+inline void wrapAnglePair(float& current, float& previous) noexcept
+{
+    while (current - previous < -180.0f)
+        previous -= 360.0f;
+    while (current - previous >= 180.0f)
+        previous += 360.0f;
+}
+
+// EntityMob.isValidLightLevel, factored for tests.
+// skyLight is EnumSkyBlock.SKY (raw). neighborLight is
+// World.getLightFromNeighbors (time-adjusted combined light).
+// skyRoll is rand.nextInt(32); neighborRoll is rand.nextInt(8).
+[[nodiscard]] inline bool vanillaHostileLightAllowsSpawn(
+    int skyLight,
+    int neighborLight,
+    int skyRoll,
+    int neighborRoll) noexcept
+{
+    if (skyLight > skyRoll)
+        return false;
+    return neighborLight <= neighborRoll;
+}
 }

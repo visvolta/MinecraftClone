@@ -9,7 +9,7 @@ class Creature : public Mob
 public:
     explicit Creature(World& world);
 
-    [[nodiscard]] float getBlockPathWeight(int x, int y, int z) const;
+    [[nodiscard]] float getBlockPathWeight(int x, int y, int z) const override;
     [[nodiscard]] bool getCanSpawnHere() override;
     [[nodiscard]] bool hasPath() const;
     void setHomePosAndDistance(int x, int y, int z, int distance);

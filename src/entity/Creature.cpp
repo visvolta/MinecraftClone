@@ -9,7 +9,7 @@ namespace mc::entity
 {
 Creature::Creature(World& world) : Mob(world) {}
 
-float Creature::getBlockPathWeight(int x, int y, int z) const
+float Creature::getBlockPathWeight(int, int, int) const
 {
     return 0.0f;
 }

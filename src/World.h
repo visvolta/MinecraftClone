@@ -200,7 +200,12 @@ public:
         const mc::entity::Entity* entity,
         const mc::entity::AxisAlignedBB& area) const;
     [[nodiscard]] bool canSeeSky(int x, int y, int z) const;
+    [[nodiscard]] int getEffectiveSkyLight(int x, int y, int z) const;
+    [[nodiscard]] int calculateSkylightSubtracted() const;
+    [[nodiscard]] int getLightFromNeighbors(int x, int y, int z) const;
     [[nodiscard]] float getLightBrightness(int x, int y, int z) const;
+    [[nodiscard]] float getRenderLightBrightness(int x, int y, int z) const;
+    [[nodiscard]] bool containsEntity(const mc::entity::Entity* entity) const;
     [[nodiscard]] bool isDaytime() const;
     [[nodiscard]] mc::entity::Difficulty getDifficulty() const noexcept;
     void setDifficulty(mc::entity::Difficulty difficulty) noexcept;
@@ -307,6 +312,8 @@ private:
     double worldUpdateMilliseconds_ = 0.0;
 
     std::vector<std::unique_ptr<mc::entity::Entity>> entities_;
+    std::vector<std::unique_ptr<mc::entity::Entity>> pendingEntities_;
+    bool tickingEntities_ = false;
     mc::entity::PlayerEntity* player_ = nullptr;
     mc::entity::Difficulty difficulty_ = mc::entity::Difficulty::Normal;
     std::uint64_t worldTime_ = 0;
@@ -349,6 +356,8 @@ private:
     void integrateCompletedJobs(double budgetMilliseconds);
     void removeDistantChunks();
 
+    void flushPendingEntities();
+    void clearDeadEntityReferences();
     void storeWorkerException() noexcept;
     void rethrowWorkerException();
 

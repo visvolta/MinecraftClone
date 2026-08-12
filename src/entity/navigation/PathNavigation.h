@@ -194,6 +194,7 @@ public:
 
     [[nodiscard]] bool noPath() const noexcept;
     [[nodiscard]] const Path* path() const noexcept;
+    [[nodiscard]] std::optional<glm::vec3> currentMoveTarget() const noexcept;
     [[nodiscard]] glm::vec3 desiredDirection() const noexcept;
     [[nodiscard]] double speed() const noexcept;
     void setSpeed(double speed) noexcept;

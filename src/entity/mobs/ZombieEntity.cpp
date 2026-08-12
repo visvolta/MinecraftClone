@@ -94,7 +94,7 @@ float ZombieEntity::getEyeHeight() const
     return isChild() ? 0.93f : 1.74f;
 }
 
-int ZombieEntity::getExperiencePoints(PlayerEntity* player) const
+int ZombieEntity::getExperiencePoints(PlayerEntity* /*player*/) const
 {
     int value = experienceValue_;
     if (isChild())

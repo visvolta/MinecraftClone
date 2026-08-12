@@ -72,11 +72,41 @@ void Mob::updateEntityActionState()
     navigator_.settings().height = height_;
     navigation::WorldNavigationBlockAccess access(*world_);
     navigator_.tick(access, getPositionVec(), onGround, isInWater() || isInLava());
+    if (const auto target = navigator_.currentMoveTarget())
+    {
+        moveHelper_.setMoveTo(
+            static_cast<double>(target->x),
+            static_cast<double>(target->y),
+            static_cast<double>(target->z),
+            navigator_.speed());
+    }
 
     moveHelper_.onUpdateMoveHelper();
     lookHelper_.onUpdateLook();
     jumpHelper_.doJump();
+}
+
+void Mob::updateRenderYawOffset()
+{
     bodyHelper_.updateRenderAngles();
+}
+
+void Mob::setAIMoveSpeed(float speed) noexcept
+{
+    LivingEntity::setAIMoveSpeed(speed);
+    setMoveForward(speed);
+}
+
+void Mob::clearDeadEntityReferences(const Entity* removed)
+{
+    LivingEntity::clearDeadEntityReferences(removed);
+    if (attackTarget_ == removed)
+        attackTarget_ = nullptr;
+    if (leashHolder_ == removed)
+    {
+        leashed_ = false;
+        leashHolder_ = nullptr;
+    }
 }
 
 void Mob::despawnEntity()
@@ -237,13 +267,17 @@ float Mob::interpolatedYaw(float partialTick) const
 Mob::PoseState Mob::poseState(float partialTick) const
 {
     const float p = std::clamp(partialTick, 0.0f, 1.0f);
-    const float headYaw = wrapDegrees(rotationYawHead - renderYawOffset);
+    const float headNow = wrapDegrees(rotationYawHead - renderYawOffset);
+    const float headPrev = wrapDegrees(prevRotationYawHead - prevRenderYawOffset);
+    const float headYaw = headPrev + wrapDegrees(headNow - headPrev) * p;
+    const float pitch = prevRotationPitch +
+        wrapDegrees(rotationPitch - prevRotationPitch) * p;
     return {
         static_cast<float>(ticksExisted_) + p,
         limbSwing + limbSwingAmount * p,
         prevLimbSwingAmount + (limbSwingAmount - prevLimbSwingAmount) * p,
         toRadians(headYaw),
-        toRadians(rotationPitch),
+        toRadians(pitch),
         getAttackProgress(),
         onGround ? 0.0f : std::clamp(static_cast<float>(std::abs(motionY)) * 2.0f, 0.0f, 1.0f),
         static_cast<float>(hurtTime) / 10.0f,

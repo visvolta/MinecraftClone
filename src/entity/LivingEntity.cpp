@@ -75,6 +75,13 @@ bool LivingEntity::isAlive() const
     return !dead_ && health_ > 0.0f && !isDead();
 }
 
+void LivingEntity::onEntityUpdate()
+{
+    Entity::onEntityUpdate();
+    prevRenderYawOffset = renderYawOffset;
+    prevRotationYawHead = rotationYawHead;
+}
+
 void LivingEntity::onUpdate()
 {
     Entity::onUpdate();
@@ -102,10 +109,13 @@ void LivingEntity::onUpdate()
         ++deathTime;
         if (deathTime >= 20)
             setDead();
+        wrapRenderAngles();
         return;
     }
 
     onLivingUpdate();
+    updateRenderYawOffset();
+    wrapRenderAngles();
 }
 
 void LivingEntity::onLivingUpdate()
@@ -114,6 +124,24 @@ void LivingEntity::onLivingUpdate()
         --jumpTicks_;
 
     updatePotionEffects();
+
+    if (std::abs(motionX) < 0.003)
+        motionX = 0.0;
+    if (std::abs(motionY) < 0.003)
+        motionY = 0.0;
+    if (std::abs(motionZ) < 0.003)
+        motionZ = 0.0;
+
+    if (!isAlive())
+    {
+        isJumping_ = false;
+        moveStrafing = 0.0f;
+        moveForward = 0.0f;
+    }
+    else
+    {
+        updateEntityActionState();
+    }
 
     if (isJumping_)
     {
@@ -134,21 +162,70 @@ void LivingEntity::onLivingUpdate()
 
     moveStrafing *= 0.98f;
     moveForward *= 0.98f;
-    updateEntityActionState();
     travel(moveStrafing, moveVertical, moveForward);
     collideWithNearbyEntities();
     updateLimbSwing();
     updateDistanceWalked();
+}
 
-    prevRenderYawOffset = renderYawOffset;
-    prevRotationYawHead = rotationYawHead;
-    const float bodyDelta = wrapDegrees(rotationYaw - renderYawOffset);
-    renderYawOffset += bodyDelta * 0.3f;
-    float headDelta = wrapDegrees(rotationYawHead - renderYawOffset);
+void LivingEntity::updateRenderYawOffset()
+{
+    const double dx = posX - prevPosX;
+    const double dz = posZ - prevPosZ;
+    float bodyYaw = renderYawOffset;
+    if (dx * dx + dz * dz > 0.0025000002)
+    {
+        bodyYaw = toDegrees(static_cast<float>(std::atan2(dz, dx))) - 90.0f;
+        const float facingDelta = std::abs(wrapDegrees(rotationYaw) - bodyYaw);
+        if (95.0f < facingDelta && facingDelta < 265.0f)
+            bodyYaw -= 180.0f;
+    }
+    if (swingProgress_ > 0.0f)
+        bodyYaw = rotationYaw;
+
+    float f = wrapDegrees(bodyYaw - renderYawOffset);
+    renderYawOffset += f * 0.3f;
+    float headDelta = wrapDegrees(rotationYaw - renderYawOffset);
     headDelta = std::clamp(headDelta, -75.0f, 75.0f);
-    renderYawOffset = rotationYawHead - headDelta;
+    renderYawOffset = rotationYaw - headDelta;
     if (headDelta * headDelta > 2500.0f)
         renderYawOffset += headDelta * 0.2f;
+}
+
+void LivingEntity::wrapRenderAngles()
+{
+    wrapAnglePair(rotationYaw, prevRotationYaw);
+    wrapAnglePair(renderYawOffset, prevRenderYawOffset);
+    wrapAnglePair(rotationPitch, prevRotationPitch);
+    wrapAnglePair(rotationYawHead, prevRotationYawHead);
+}
+
+void LivingEntity::clearDeadEntityReferences(const Entity* removed)
+{
+    if (removed == nullptr)
+        return;
+    if (revengeTarget_ == removed)
+        setRevengeTarget(nullptr);
+    if (lastAttackedEntity_ == removed)
+        setLastAttackedEntity(nullptr);
+    if (attackingPlayer_ == removed)
+        attackingPlayer_ = nullptr;
+}
+
+float LivingEntity::getBrightness() const
+{
+    const int x = floorInt(posX);
+    const int y = floorInt(posY + getEyeHeight());
+    const int z = floorInt(posZ);
+    return world_->getLightBrightness(x, y, z);
+}
+
+float LivingEntity::getRenderBrightness() const
+{
+    const int x = floorInt(posX);
+    const int y = floorInt(posY + getEyeHeight());
+    const int z = floorInt(posZ);
+    return world_->getRenderLightBrightness(x, y, z);
 }
 
 void LivingEntity::travel(float strafe, float vertical, float forward)

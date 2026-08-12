@@ -19,11 +19,10 @@ public:
 
     // textureRoot is assets/textures. Standalone item sprites are stitched
     // from their individual 1.12 resource files at runtime, matching blocks.
-    explicit ItemAtlas(const std::filesystem::path& textureRoot,const std::filesystem::path& resourceRoot = {});
+    explicit ItemAtlas(const std::filesystem::path& textureRoot);
 
     [[nodiscard]] const Texture2D& texture() const noexcept;
     [[nodiscard]] AtlasUV getItemUV(ItemType item) const;
-    [[nodiscard]] bool hasItemUV(ItemType item) const noexcept;
     [[nodiscard]] bool isOpaque(
         ItemType item,
         int pixelX,

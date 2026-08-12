@@ -39,7 +39,9 @@ std::uint32_t itemMeshKey(const ItemStack& stack) noexcept
 {
     const std::uint32_t item =
         static_cast<std::uint32_t>(static_cast<std::uint16_t>(stack.item));
-    const std::uint32_t metadata = static_cast<std::uint32_t>(stack.damage);
+    const std::uint32_t metadata = isBlockItem(stack.item)
+        ? static_cast<std::uint32_t>(stack.damage)
+        : 0U;
     return item | (metadata << 16U);
 }
 
@@ -289,7 +291,10 @@ void ItemEntityRenderer::draw(
     shader_->setFloat("fogStart", atmosphere.fogStart);
     shader_->setFloat("fogEnd", atmosphere.fogEnd);
     shader_->setFloat("fogDensity", atmosphere.fogDensity);
-    const bool flatItem=itemAtlas.hasItemUV(item); if(flatItem)itemAtlas.texture().bind(0);else blockAtlas.bind(0);
+    if (isBlockItem(item))
+        blockAtlas.bind(0);
+    else
+        itemAtlas.texture().bind(0);
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
@@ -304,7 +309,7 @@ void ItemEntityRenderer::draw(
 
     std::mt19937 offsets(187U);
     std::uniform_real_distribution<float> offset(-0.15f, 0.15f);
-    const float scale = flatItem ? 0.5f : 0.25f;
+    const float scale = isBlockItem(item) ? 0.25f : 0.5f;
     for (int copy = 0; copy < copyCount; ++copy)
     {
         glm::mat4 model(1.0f);
@@ -330,11 +335,6 @@ void ItemEntityRenderer::draw(
     glBindVertexArray(0);
 }
 
-void ItemEntityRenderer::drawHeld(const ItemStack& stack,const glm::mat4& projection,const Texture2D& blockAtlas,const ItemAtlas& itemAtlas,const AtmosphereState& atmosphere)
-{
-    if(stack.empty())return;const GpuMesh& mesh=meshFor(stack,itemAtlas);if(mesh.vertexCount==0)return;const bool flat=itemAtlas.hasItemUV(stack.item);if(flat)itemAtlas.texture().bind(0);else blockAtlas.bind(0);shader_->use();shader_->setMat4("view",glm::mat4(1.f));shader_->setMat4("projection",projection);shader_->setFloat("daylightBrightness",atmosphere.daylightBrightness);shader_->setInt("fogMode",0);glm::mat4 model(1.f);model=glm::translate(model,flat?glm::vec3(.62f,-.52f,-1.15f):glm::vec3(.62f,-.58f,-1.25f));model=glm::rotate(model,glm::radians(flat?-18.f:25.f),glm::vec3(1,0,0));model=glm::rotate(model,glm::radians(flat?-35.f:45.f),glm::vec3(0,1,0));model=glm::scale(model,glm::vec3(flat?.55f:.48f));shader_->setMat4("model",model);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glEnable(GL_CULL_FACE);glDisable(GL_BLEND);glBindVertexArray(mesh.vertexArray);glDrawArrays(GL_TRIANGLES,0,mesh.vertexCount);glBindVertexArray(0);
-}
-
 const ItemEntityRenderer::GpuMesh& ItemEntityRenderer::meshFor(
     const ItemStack& stack,
     const ItemAtlas& itemAtlas)
@@ -352,7 +352,7 @@ ItemEntityRenderer::buildVertices(
 {
     const ItemType item = stack.item;
     std::vector<Vertex> vertices;
-    if (itemAtlas.hasItemUV(item))
+    if (!isBlockItem(item))
     {
         const AtlasUV uv = itemAtlas.getItemUV(item);
         constexpr float halfThickness = 1.0f / 32.0f;
@@ -452,15 +452,56 @@ ItemEntityRenderer::buildVertices(
         return vertices;
     }
 
-    const mc::content::ContentCatalog* catalog=mc::content::ContentCatalog::active(); mc::content::BlockState itemState{}; const auto placement=catalog?catalog->itemBlockState(item,stack.damage):std::optional<mc::content::BlockState>{}; if(placement)itemState=*placement;
-    if(catalog!=nullptr)
-    {
-        const mc::content::BlockDefinition* definition=placement?catalog->block(*placement):nullptr;
+    const BlockType block = blockFromItem(item);
+    const mc::content::ContentCatalog* catalog =
+        mc::content::ContentCatalog::active();
+    mc::content::BlockState itemState(block, 0);
 
-        if(const auto* model=catalog->itemModel(item))try{const mc::content::resources::ResourcePack resources(AssetPaths::root());const mc::client::ModelBakery bakery(resources,*catalog);if(appendBakedModel(vertices,bakery.bakeModel(*model),definition))return vertices;}catch(const std::exception&){}
-        if(placement)if(const auto* baked=TextureAtlas::getBakedBlockModel(*placement,0U))if(appendBakedModel(vertices,*baked,definition))return vertices;
+    if (catalog != nullptr)
+    {
+        itemState = catalog->defaultState(block);
+
+        const mc::content::BlockState metadataState(
+            block, static_cast<std::uint16_t>(stack.damage)
+        );
+        if (catalog->isValidState(metadataState))
+            itemState = metadataState;
+
+        const mc::content::BlockDefinition* definition =
+            catalog->block(itemState);
+
+        if (const mc::core::ResourceLocation* itemName =
+                catalog->itemName(item))
+        {
+            try
+            {
+                const mc::content::resources::ResourcePack resources(
+                    AssetPaths::root()
+                );
+                const mc::client::ModelBakery bakery(resources, *catalog);
+                const mc::core::ResourceLocation modelName(
+                    itemName->nameSpace(),
+                    std::string("item/") + itemName->path()
+                );
+                if (appendBakedModel(
+                        vertices, bakery.bakeModel(modelName), definition))
+                    return vertices;
+            }
+            catch (const std::exception&)
+            {
+                // builtin/entity and deliberately model-less ItemBlocks use
+                // the block-model / legacy fallbacks below.
+            }
+        }
+
+        if (const mc::client::BakedModel* baked =
+                TextureAtlas::getBakedBlockModel(itemState, 0U))
+        {
+            if (appendBakedModel(vertices, *baked, definition))
+                return vertices;
+        }
     }
-    if(itemState.isAir())return vertices;
+
     const BlockShapeDefinition& shape = getBlockShape(itemState);
 
     if (shape.renderShape == BlockRenderShape::Boxes)

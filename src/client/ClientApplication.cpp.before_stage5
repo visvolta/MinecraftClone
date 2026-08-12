@@ -193,7 +193,7 @@ namespace
             return std::nullopt;
         ItemType item = ItemType::Empty;
         if (const std::optional<ItemType> registered =
-                content.itemType(drop.item))
+                content.legacyItem(drop.item))
         {
             item = *registered;
         }
@@ -462,8 +462,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             << stoneBlockState.variants.size() << " stone state variant and "
             << stoneTextures.size() << " model texture dependency\n";
         ItemAtlas itemAtlas(
-            AssetPaths::root() / "textures",
-            AssetPaths::root()
+            AssetPaths::root() / "textures"
         );
         FluidTextures fluidTextures;
         BlockOutline blockOutline;
@@ -1223,12 +1222,6 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 itemAtlas,
                 atmosphereState
             );
-            if (!inventoryUI.isOpen())
-            {
-                const ItemStack& heldStack = inventory.getSlot(inventory.getSelectedHotbarSlot());
-                glClear(GL_DEPTH_BUFFER_BIT);
-                itemEntities.drawHeld(heldStack,projection,blockAtlas,itemAtlas,atmosphereState);
-            }
             mobEntityRenderer.draw(
                 mobEntities.entities(),
                 partialGameTick,

@@ -59,7 +59,6 @@ public:
         const AtmosphereState& atmosphere
     );
 
-    void drawHeld(const ItemStack& stack,const glm::mat4& projection,const Texture2D& blockAtlas,const ItemAtlas& itemAtlas,const AtmosphereState& atmosphere);
     [[nodiscard]] std::size_t size() const noexcept;
     void clear() noexcept;
 

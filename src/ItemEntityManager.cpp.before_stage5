@@ -204,9 +204,6 @@ void ItemEntityManager::draw(
     }
 }
 
-void ItemEntityManager::drawHeld(const ItemStack& stack,const glm::mat4& projection,const Texture2D& blockAtlas,const ItemAtlas& itemAtlas,const AtmosphereState& atmosphere)
-{ renderer_->drawHeld(stack,projection,blockAtlas,itemAtlas,atmosphere); }
-
 std::size_t ItemEntityManager::size() const noexcept
 {
     return entities_.size();

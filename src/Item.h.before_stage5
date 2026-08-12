@@ -1,11 +1,9 @@
 #pragma once
 
 #include "Block.h"
-#include "content/BlockState.h"
 #include "ToolProperties.h"
 
 #include <cstdint>
-#include <optional>
 
 // Block items retain their BlockType numeric value. Standalone items begin at
 // 256, matching Beta's split between block IDs and Item.shiftedIndex values.
@@ -125,10 +123,6 @@ enum class ItemType : std::uint16_t
     Lead
 };
 
-inline constexpr std::uint16_t DynamicItemBase = 4096U;
-[[nodiscard]] constexpr bool isDynamicItem(ItemType item) noexcept
-{ return static_cast<std::uint16_t>(item) >= DynamicItemBase; }
-
 enum class ArmorSlot : std::uint8_t
 {
     None,
@@ -172,10 +166,6 @@ struct ItemProperties
         ? static_cast<BlockType>(static_cast<std::uint8_t>(item))
         : BlockType::Air;
 }
-
-[[nodiscard]] bool isRegisteredBlockItem(ItemType item) noexcept;
-[[nodiscard]] std::optional<mc::content::BlockState> blockStateFromItem(
-    ItemType item, std::uint16_t damage = 0) noexcept;
 
 [[nodiscard]] const ItemProperties& getItemProperties(
     ItemType item

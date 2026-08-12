@@ -493,12 +493,6 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-    add_executable(minecraft_item_runtime_parity_tests tests/ItemRuntimeParityTests.cpp)
-    target_include_directories(minecraft_item_runtime_parity_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(minecraft_item_runtime_parity_tests PRIVATE minecraft_game minecraft_client minecraft_world)
-    add_test(NAME minecraft_item_runtime_parity_tests COMMAND minecraft_item_runtime_parity_tests)
-    set_tests_properties(minecraft_item_runtime_parity_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-
     add_executable(minecraft_world_generation_tests
         tests/WorldGenerationTests.cpp
     )

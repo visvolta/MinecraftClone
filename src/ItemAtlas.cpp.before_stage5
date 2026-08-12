@@ -1,14 +1,10 @@
 #include "ItemAtlas.h"
-#include "content/ContentCatalog.h"
-#include "content/resources/ResourcePack.h"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
-#include <optional>
-#include <unordered_set>
 
 #include <stb_image.h>
 
@@ -143,16 +139,98 @@ void setPixel(
 }
 }
 
-ItemAtlas::ItemAtlas(const std::filesystem::path& textureRoot,const std::filesystem::path& resourceRoot)
+ItemAtlas::ItemAtlas(const std::filesystem::path& textureRoot)
 {
-    struct Source{ItemType item;std::vector<std::filesystem::path> layers;};
-    const auto packRoot=resourceRoot.empty()?textureRoot.parent_path():resourceRoot; mc::content::resources::ResourcePack pack(packRoot);
-    auto layersFor=[&](const mc::core::ResourceLocation& model){std::unordered_map<std::string,std::string> tex;auto cur=model;for(int d=0;d<32;++d){if(cur.path().rfind("builtin/",0)==0)break;const auto m=pack.loadModel(cur);for(const auto& [k,v]:m.textures)tex.try_emplace(k,v);if(!m.parent||m.parent->path().rfind("builtin/",0)==0)break;cur=*m.parent;}auto resolve=[&](std::string v)->std::optional<mc::core::ResourceLocation>{std::unordered_set<std::string> seen;while(!v.empty()&&v.front()=='#'){const auto k=v.substr(1);if(!seen.insert(k).second)return std::nullopt;const auto it=tex.find(k);if(it==tex.end())return std::nullopt;v=it->second;}if(v.empty())return std::nullopt;return mc::core::ResourceLocation(v);};std::vector<std::filesystem::path> r;for(int l=0;l<8;++l){const auto it=tex.find("layer"+std::to_string(l));if(it==tex.end())continue;const auto t=resolve(it->second);if(t)r.push_back(packRoot/t->nameSpace()/"textures"/(t->path()+".png"));}return r;};
-    std::vector<Source> srcs;std::unordered_set<std::uint16_t> seen;if(const auto* c=mc::content::ContentCatalog::active())for(const auto& e:c->items().entries()){const auto type=c->itemType(e.name);if(!type||!e.value.model)continue;try{auto ls=layersFor(*e.value.model);if(!ls.empty()){srcs.push_back({*type,std::move(ls)});seen.insert(static_cast<std::uint16_t>(*type));}}catch(const std::exception&){} }
-    const auto first=static_cast<std::uint16_t>(ItemType::Stick),last=static_cast<std::uint16_t>(ItemType::Lead);for(std::uint16_t v=first;v<=last;++v){const auto it=static_cast<ItemType>(v);if(seen.contains(v)||itemTexture(it).empty())continue;srcs.push_back({it,{textureRoot/(std::string(itemTexture(it))+".png")}});} if(srcs.empty())throw std::runtime_error("No 1.12 item textures discovered");
-    const int cols=static_cast<int>(std::ceil(std::sqrt(static_cast<double>(srcs.size()))));const int rows=static_cast<int>((srcs.size()+cols-1)/cols);const int width=cols*CELL_SIZE_PIXELS,height=rows*CELL_SIZE_PIXELS;std::vector<std::uint8_t> top(static_cast<std::size_t>(width*height*4),0);
-    for(std::size_t idx=0;idx<srcs.size();++idx){std::array<std::uint8_t,1024> comp{};for(const auto& path:srcs[idx].layers){int sw=0,sh=0,ch=0;stbi_set_flip_vertically_on_load(false);unsigned char* px=stbi_load(path.string().c_str(),&sw,&sh,&ch,4);if(!px||sw<16||sh<16){if(px)stbi_image_free(px);throw std::runtime_error("Missing 1.12 item texture: "+path.string());}for(int y=0;y<16;++y)for(int x=0;x<16;++x){const auto* a=px+static_cast<std::size_t>((y*sw+x)*4);auto* b=comp.data()+static_cast<std::size_t>((y*16+x)*4);const float al=a[3]/255.f,inv=1.f-al;for(int c=0;c<3;++c)b[c]=static_cast<std::uint8_t>(a[c]*al+b[c]*inv);b[3]=static_cast<std::uint8_t>(a[3]+b[3]*inv);}stbi_image_free(px);}const int cx=static_cast<int>(idx%cols)*CELL_SIZE_PIXELS,cy=static_cast<int>(idx/cols)*CELL_SIZE_PIXELS;auto& alpha=alpha_[srcs[idx].item];for(int y=0;y<CELL_SIZE_PIXELS;++y){const int sy=std::clamp(y-GUTTER_PIXELS,0,15);for(int x=0;x<CELL_SIZE_PIXELS;++x){const int sx=std::clamp(x-GUTTER_PIXELS,0,15);setPixel(top,width,cx+x,cy+y,comp.data()+static_cast<std::size_t>((sy*16+sx)*4));}}for(int y=0;y<16;++y)for(int x=0;x<16;++x)alpha[static_cast<std::size_t>(y*16+x)]=comp[static_cast<std::size_t>((y*16+x)*4+3)];constexpr float in=.01f;const int ix=cx+GUTTER_PIXELS,iy=cy+GUTTER_PIXELS,gb=height-iy-16;entries_.emplace(srcs[idx].item,AtlasUV{(ix+in)/width,(gb+in)/height,(ix+16-in)/width,(gb+16-in)/height});}
-    std::vector<std::uint8_t> bottom(top.size());const std::size_t rb=static_cast<std::size_t>(width*4);for(int y=0;y<height;++y)std::copy_n(top.data()+static_cast<std::size_t>(y)*rb,rb,bottom.data()+static_cast<std::size_t>(height-y-1)*rb);texture_=std::make_unique<Texture2D>(width,height,bottom);
+    std::vector<ItemType> items;
+    const auto first = static_cast<std::uint16_t>(ItemType::Stick);
+    const auto last = static_cast<std::uint16_t>(ItemType::Lead);
+    for (std::uint16_t value = first; value <= last; ++value)
+    {
+        const ItemType item = static_cast<ItemType>(value);
+        if (!itemTexture(item).empty())
+            items.push_back(item);
+    }
+
+    const int columns = static_cast<int>(std::ceil(
+        std::sqrt(static_cast<double>(items.size()))
+    ));
+    const int rows = static_cast<int>(
+        (items.size() + static_cast<std::size_t>(columns) - 1U) /
+        static_cast<std::size_t>(columns)
+    );
+    const int width = columns * CELL_SIZE_PIXELS;
+    const int height = rows * CELL_SIZE_PIXELS;
+    std::vector<std::uint8_t> topDown(
+        static_cast<std::size_t>(width * height * 4), 0U
+    );
+
+    for (std::size_t index = 0; index < items.size(); ++index)
+    {
+        const ItemType item = items[index];
+        const std::filesystem::path path = textureRoot /
+            (std::string(itemTexture(item)) + ".png");
+        int sourceWidth = 0;
+        int sourceHeight = 0;
+        int channels = 0;
+        stbi_set_flip_vertically_on_load(false);
+        unsigned char* source = stbi_load(
+            path.string().c_str(), &sourceWidth, &sourceHeight, &channels, 4
+        );
+        if (source == nullptr || sourceWidth < 16 || sourceHeight < 16)
+        {
+            if (source != nullptr)
+                stbi_image_free(source);
+            throw std::runtime_error("Missing 1.12 item texture: " + path.string());
+        }
+
+        const int cellX = static_cast<int>(index % static_cast<std::size_t>(columns)) * CELL_SIZE_PIXELS;
+        const int cellY = static_cast<int>(index / static_cast<std::size_t>(columns)) * CELL_SIZE_PIXELS;
+        auto& itemAlpha = alpha_[item];
+        for (int y = 0; y < CELL_SIZE_PIXELS; ++y)
+        {
+            const int sourceY = std::clamp(y - GUTTER_PIXELS, 0, 15);
+            for (int x = 0; x < CELL_SIZE_PIXELS; ++x)
+            {
+                const int sourceX = std::clamp(x - GUTTER_PIXELS, 0, 15);
+                const auto* colour = source +
+                    static_cast<std::size_t>((sourceY * sourceWidth + sourceX) * 4);
+                setPixel(topDown, width, cellX + x, cellY + y, colour);
+            }
+        }
+        for (int y = 0; y < 16; ++y)
+        {
+            for (int x = 0; x < 16; ++x)
+            {
+                itemAlpha[static_cast<std::size_t>(y * 16 + x)] = source[
+                    static_cast<std::size_t>((y * sourceWidth + x) * 4 + 3)
+                ];
+            }
+        }
+        stbi_image_free(source);
+
+        constexpr float inset = 0.01f;
+        const int imageX = cellX + GUTTER_PIXELS;
+        const int imageY = cellY + GUTTER_PIXELS;
+        const int glBottom = height - imageY - 16;
+        entries_.emplace(item, AtlasUV{
+            (static_cast<float>(imageX) + inset) / static_cast<float>(width),
+            (static_cast<float>(glBottom) + inset) / static_cast<float>(height),
+            (static_cast<float>(imageX + 16) - inset) / static_cast<float>(width),
+            (static_cast<float>(glBottom + 16) - inset) / static_cast<float>(height)
+        });
+    }
+
+    std::vector<std::uint8_t> bottomUp(topDown.size());
+    const std::size_t rowBytes = static_cast<std::size_t>(width * 4);
+    for (int y = 0; y < height; ++y)
+    {
+        std::copy_n(
+            topDown.data() + static_cast<std::size_t>(y) * rowBytes,
+            rowBytes,
+            bottomUp.data() + static_cast<std::size_t>(height - y - 1) * rowBytes
+        );
+    }
+    texture_ = std::make_unique<Texture2D>(width, height, bottomUp);
 }
 
 const Texture2D& ItemAtlas::texture() const noexcept { return *texture_; }
@@ -164,8 +242,6 @@ AtlasUV ItemAtlas::getItemUV(ItemType item) const
         throw std::invalid_argument("Item has no runtime item texture");
     return found->second;
 }
-
-bool ItemAtlas::hasItemUV(ItemType item) const noexcept { return entries_.contains(item); }
 
 bool ItemAtlas::isOpaque(ItemType item, int pixelX, int pixelY) const noexcept
 {

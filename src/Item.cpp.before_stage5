@@ -378,9 +378,3 @@ void ItemStack::damageItem(int amount) noexcept
     if (damage > maximumDamage)
         clear();
 }
-
-
-bool isRegisteredBlockItem(ItemType item) noexcept
-{ if(isBlockItem(item)) return true; const auto* c=mc::content::ContentCatalog::active(); const auto* d=c?c->item(item):nullptr; return d&&d->placedBlock.has_value(); }
-std::optional<mc::content::BlockState> blockStateFromItem(ItemType item,std::uint16_t damage) noexcept
-{ if(const auto* c=mc::content::ContentCatalog::active()) if(auto s=c->itemBlockState(item,damage)) return s; if(!isBlockItem(item)) return std::nullopt; return mc::content::BlockState(blockFromItem(item),damage); }

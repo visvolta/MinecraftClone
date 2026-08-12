@@ -1,7 +1,6 @@
 #include "content/ContentCatalog.h"
 
 #include <algorithm>
-#include <limits>
 #include <charconv>
 #include <stdexcept>
 #include <utility>
@@ -412,13 +411,10 @@ std::optional<BlockType> ContentCatalog::legacyBlock(
     return definition == nullptr ? std::nullopt : definition->legacyType;
 }
 
-const ItemDefinition* ContentCatalog::item(ItemType itemType) const noexcept
+const ItemDefinition* ContentCatalog::item(ItemType legacyType) const noexcept
 {
-    const std::uint16_t v=static_cast<std::uint16_t>(itemType);
-    if(const auto it=legacyItems_.find(v);it!=legacyItems_.end()) return items_.find(it->second);
-    if(v<DynamicItemBase||!items_.frozen()) return nullptr;
-    const auto* e=items_.entry(static_cast<core::RuntimeId>(v-DynamicItemBase));
-    return e?&e->value:nullptr;
+    const auto found = legacyItems_.find(static_cast<std::uint16_t>(legacyType));
+    return found == legacyItems_.end() ? nullptr : items_.find(found->second);
 }
 
 const ItemDefinition* ContentCatalog::item(
@@ -434,29 +430,14 @@ std::optional<ItemType> ContentCatalog::legacyItem(
     return definition == nullptr ? std::nullopt : definition->legacyType;
 }
 
-std::optional<ItemType> ContentCatalog::itemType(const core::ResourceLocation& name) const noexcept
+const core::ResourceLocation* ContentCatalog::itemName(
+    ItemType legacyType) const noexcept
 {
-    const auto* e=items_.entry(name); if(!e) return std::nullopt;
-    if(e->value.legacyType) return e->value.legacyType;
-    if(!items_.frozen()||e->runtimeId==core::InvalidRuntimeId) return std::nullopt;
-    if(e->runtimeId>static_cast<core::RuntimeId>(std::numeric_limits<std::uint16_t>::max()-DynamicItemBase)) return std::nullopt;
-    return static_cast<ItemType>(DynamicItemBase+static_cast<std::uint16_t>(e->runtimeId));
-}
-
-const core::ResourceLocation* ContentCatalog::itemName(ItemType itemType) const noexcept
-{
-    const std::uint16_t v=static_cast<std::uint16_t>(itemType);
-    if(const auto it=legacyItems_.find(v);it!=legacyItems_.end()) { const auto* e=items_.entry(it->second); return e?&e->name:nullptr; }
-    if(v<DynamicItemBase||!items_.frozen()) return nullptr;
-    const auto* e=items_.entry(static_cast<core::RuntimeId>(v-DynamicItemBase)); return e?&e->name:nullptr;
-}
-const core::ResourceLocation* ContentCatalog::itemModel(ItemType itemType) const noexcept
-{ const auto* d=item(itemType); return d&&d->model?&*d->model:nullptr; }
-std::optional<BlockState> ContentCatalog::itemBlockState(ItemType itemType,std::uint16_t damage) const
-{
-    static_cast<void>(damage); const auto* d=item(itemType); if(!d||!d->placedBlock) return std::nullopt;
-    if(!d->placementProperties.empty()) return state(*d->placedBlock,std::span<const std::pair<std::string,std::string>>(d->placementProperties));
-    const BlockState result=defaultState(*d->placedBlock); return isValidState(result)?std::optional<BlockState>(result):std::nullopt;
+    const auto found = legacyItems_.find(static_cast<std::uint16_t>(legacyType));
+    if (found == legacyItems_.end())
+        return nullptr;
+    const auto* entry = items_.entry(found->second);
+    return entry == nullptr ? nullptr : &entry->name;
 }
 
 const core::Registry<BlockDefinition>& ContentCatalog::blocks() const noexcept

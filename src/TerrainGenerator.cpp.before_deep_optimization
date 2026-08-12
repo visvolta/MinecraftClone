@@ -88,7 +88,6 @@ void TerrainGenerator::generateChunk(Chunk& chunk) const
 void TerrainGenerator::generateTerrainOnly(Chunk& chunk) const
 {
     chunk.clear();
-    chunk.beginBulkBlockUpdate();
 
     const std::vector<ClimateSample> climate = biomeMap_.sampleArea(
         chunk.getWorldOriginX(), chunk.getWorldOriginZ(),
@@ -106,11 +105,10 @@ void TerrainGenerator::generateTerrainOnly(Chunk& chunk) const
         {
             const ClimateSample& sample = climate[
                 climateIndex(localX, localZ, Chunk::DEPTH)];
-            chunk.setBiomeAndClimate(
-                localX, localZ, sample.biome,
+            chunk.setBiome(localX, localZ, sample.biome);
+            chunk.setClimate(localX, localZ,
                 static_cast<float>(sample.temperature),
-                static_cast<float>(sample.humidity)
-            );
+                static_cast<float>(sample.humidity));
         }
     }
 
@@ -124,7 +122,6 @@ void TerrainGenerator::generateTerrainOnly(Chunk& chunk) const
     // ChunkGeneratorOverworld carves these after biome surface replacement.
     caveGenerator_.generate(chunk);
     ravineGenerator_.generate(chunk);
-    chunk.endBulkBlockUpdate();
 }
 
 std::optional<StructureLocation> TerrainGenerator::findNearestStructure(
@@ -368,18 +365,17 @@ void TerrainGenerator::initializeNoiseField(
     densityField_.assign(
         static_cast<std::size_t>(sizeX * sizeY * sizeZ), 0.0);
 
-    static const std::array<float, 25> biomeWeights = []
+    std::array<float, 25> biomeWeights{};
+    for (int offsetX = -2; offsetX <= 2; ++offsetX)
     {
-        std::array<float, 25> values{};
-        for (int offsetX = -2; offsetX <= 2; ++offsetX)
-            for (int offsetZ = -2; offsetZ <= 2; ++offsetZ)
-                values[static_cast<std::size_t>(
-                    offsetX + 2 + (offsetZ + 2) * 5)] =
-                    10.0f / std::sqrt(
-                        static_cast<float>(
-                            offsetX * offsetX + offsetZ * offsetZ) + 0.2f);
-        return values;
-    }();
+        for (int offsetZ = -2; offsetZ <= 2; ++offsetZ)
+        {
+            biomeWeights[static_cast<std::size_t>(
+                offsetX + 2 + (offsetZ + 2) * 5)] =
+                10.0f / std::sqrt(
+                    static_cast<float>(offsetX * offsetX + offsetZ * offsetZ) + 0.2f);
+        }
+    }
 
     int densityPosition = 0;
     int horizontalPosition = 0;

@@ -15,7 +15,8 @@ struct ChunkSnapshot
     int chunkX = 0;
     int chunkZ = 0;
     std::vector<mc::content::BlockState> palette;
-    std::vector<std::uint16_t> paletteIndices;
+    std::vector<std::uint16_t> paletteIndices =
+        std::vector<std::uint16_t>(16U * 256U * 16U, 0U);
     std::array<float, 16 * 16> temperatures{};
     std::array<float, 16 * 16> humidities{};
     std::array<BiomeId, 16 * 16> biomeIds{};
@@ -48,8 +49,6 @@ public:
         int z,
         mc::content::BlockState state
     );
-    void beginBulkBlockUpdate() noexcept;
-    void endBulkBlockUpdate();
     [[nodiscard]] BlockType getBlock(int x, int y, int z) const;
     bool setBlock(int x, int y, int z, BlockType block);
     bool setBlockAndMetadata(
@@ -68,9 +67,6 @@ public:
     [[nodiscard]] float getTemperature(int x, int z) const;
     [[nodiscard]] float getHumidity(int x, int z) const;
     void setBiome(int x, int z, BiomeId biome);
-    void setBiomeAndClimate(
-        int x, int z, BiomeId biome, float temperature, float humidity
-    );
     [[nodiscard]] BiomeId getBiome(int x, int z) const;
     [[nodiscard]] int getWorldSurfaceHeight(int x, int z) const;
     [[nodiscard]] int getMotionBlockingHeight(int x, int z) const;
@@ -82,8 +78,6 @@ public:
     void setSkyLight(int x, int y, int z, std::uint8_t level);
     void setBlockLight(int x, int y, int z, std::uint8_t level);
     void clearLighting();
-    void fillSkyLight(std::uint8_t level) noexcept;
-    void fillBlockLight(std::uint8_t level) noexcept;
     [[nodiscard]] const std::array<std::uint8_t, BLOCK_COUNT>&
         skyLightData() const noexcept;
     [[nodiscard]] const std::array<std::uint8_t, BLOCK_COUNT>&
@@ -114,7 +108,6 @@ private:
     std::array<std::uint16_t, SECTION_COUNT> nonAirPerSection{};
     std::array<std::uint8_t, BLOCK_COUNT> skyLight{};
     std::array<std::uint8_t, BLOCK_COUNT> blockLight{};
-    bool bulkBlockUpdate_ = false;
 
     [[nodiscard]] static constexpr std::size_t index(int x, int y, int z)
     { return static_cast<std::size_t>(x + WIDTH * (z + DEPTH * y)); }
@@ -129,6 +122,5 @@ private:
         mc::content::BlockState oldState,
         mc::content::BlockState newState
     );
-    void rebuildDerivedBlockData();
 };
 #endif

@@ -355,10 +355,9 @@ int FluidSystem::flowDecay(
     int z,
     BlockType liquid) const
 {
-    const mc::content::BlockState state = world_.getBlockState(x, y, z);
-    if (state.block() != liquid)
+    if (world_.getBlock(x, y, z) != liquid)
         return -1;
-    return static_cast<int>(state.properties());
+    return static_cast<int>(world_.getBlockMetadata(x, y, z));
 }
 
 int FluidSystem::effectiveFlowDecay(
@@ -449,7 +448,8 @@ int FluidSystem::calculateFlowCost(
         const int nextZ = z + offset.z;
         if (blockBlocksFlow(nextX, y, nextZ))
             continue;
-        if (flowDecay(nextX, y, nextZ, liquid) == 0)
+        if (world_.getBlock(nextX, y, nextZ) == liquid &&
+            world_.getBlockMetadata(nextX, y, nextZ) == 0)
         {
             continue;
         }
@@ -494,7 +494,8 @@ std::array<bool, 4> FluidSystem::optimalFlowDirections(
         const int nextZ = z + offset.z;
         if (blockBlocksFlow(nextX, y, nextZ))
             continue;
-        if (flowDecay(nextX, y, nextZ, liquid) == 0)
+        if (world_.getBlock(nextX, y, nextZ) == liquid &&
+            world_.getBlockMetadata(nextX, y, nextZ) == 0)
         {
             continue;
         }

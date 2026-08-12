@@ -46,18 +46,6 @@ World::World(int renderDistance, int seed)
     for (unsigned int worker = 0; worker < generationWorkerCount; ++worker)
         generationThreads_.emplace_back(&World::generationWorker, this);
 
-    const std::size_t initialChunkCapacity = static_cast<std::size_t>(
-        (renderDistance_ * 2 + 3) * (renderDistance_ * 2 + 3));
-    chunkManager_.reserve(initialChunkCapacity);
-    desiredChunks_.reserve(initialChunkCapacity);
-    generationInFlight_.reserve(initialChunkCapacity);
-    meshInFlight_.reserve(initialChunkCapacity);
-    meshVersions_.reserve(initialChunkCapacity);
-    uploadedMeshVersions_.reserve(initialChunkCapacity);
-    highPriorityMeshKeys_.reserve(initialChunkCapacity);
-    initialMeshPending_.reserve(initialChunkCapacity);
-    chunkMeshes_.reserve(initialChunkCapacity);
-
     const unsigned int meshWorkerCount = hardwareThreads >= 6U ? 2U : 1U;
     meshThreads_.reserve(meshWorkerCount);
     for (unsigned int worker = 0; worker < meshWorkerCount; ++worker)
@@ -792,14 +780,16 @@ std::vector<ChunkSnapshot> World::getModifiedChunkSnapshots() const
     std::unordered_set<ChunkKey> loadedModified;
     loadedModified.reserve(modifiedChunks_.size());
 
-    chunkManager_.forEachChunk([&](const Chunk* chunk)
+    for (const Chunk* chunk : chunkManager_.getChunks())
     {
-        if (chunk == nullptr) return;
+        if (chunk == nullptr)
+            continue;
         const ChunkKey key = makeKey(chunk->getChunkX(), chunk->getChunkZ());
-        if (!modifiedChunks_.contains(key)) return;
+        if (!modifiedChunks_.contains(key))
+            continue;
         result.push_back(chunk->snapshot());
         loadedModified.insert(key);
-    });
+    }
 
     for (const ChunkKey key : modifiedChunks_)
     {
@@ -851,11 +841,11 @@ void World::setSmoothLightingEnabled(bool enabled)
     if (smoothLighting_ == enabled)
         return;
     smoothLighting_ = enabled;
-    chunkManager_.forEachChunk([&](const Chunk* chunk)
+    for (const Chunk* chunk : chunkManager_.getChunks())
     {
         if (chunk != nullptr)
             queueChunkMesh(chunk->getChunkX(), chunk->getChunkZ(), true);
-    });
+    }
 }
 
 bool World::isFastLeavesEnabled() const noexcept
@@ -868,11 +858,11 @@ void World::setFastLeavesEnabled(bool enabled)
     if (fastLeaves_ == enabled)
         return;
     fastLeaves_ = enabled;
-    chunkManager_.forEachChunk([&](const Chunk* chunk)
+    for (const Chunk* chunk : chunkManager_.getChunks())
     {
         if (chunk != nullptr)
             queueChunkMesh(chunk->getChunkX(), chunk->getChunkZ(), true);
-    });
+    }
 }
 
 glm::vec3 World::getFluidFlowVector(
@@ -1358,7 +1348,7 @@ ChunkMeshInput World::createMeshInput(
     if (center == nullptr)
         return input;
 
-    input.snapshot = std::make_unique_for_overwrite<ChunkMeshSnapshot>();
+    input.snapshot = std::make_unique<ChunkMeshSnapshot>();
     ChunkMeshSnapshot& snapshot = *input.snapshot;
     snapshot.chunkX = chunkX;
     snapshot.chunkZ = chunkZ;
@@ -1373,23 +1363,9 @@ ChunkMeshInput World::createMeshInput(
         }
     }
 
-    int highestNonEmptySection = -1;
     for (int section = 0; section < Chunk::SECTION_COUNT; ++section)
-    {
         snapshot.emptySections[static_cast<std::size_t>(section)] =
             center->isSectionEmpty(section);
-        for (int nz = 0; nz < 3; ++nz)
-            for (int nx = 0; nx < 3; ++nx)
-            {
-                const Chunk* candidate = neighbourhood[nz][nx];
-                if (candidate != nullptr && !candidate->isSectionEmpty(section))
-                    highestNonEmptySection = std::max(
-                        highestNonEmptySection, section);
-            }
-    }
-    snapshot.copiedMaximumY = highestNonEmptySection < 0
-        ? -1
-        : (highestNonEmptySection + 1) * Chunk::SECTION_HEIGHT - 1;
     for (int z = -ChunkMeshSnapshot::Border;
          z < Chunk::DEPTH + ChunkMeshSnapshot::Border; ++z)
     {
@@ -1424,7 +1400,7 @@ ChunkMeshInput World::createMeshInput(
         }
     }
 
-    for (int y = 0; y <= snapshot.copiedMaximumY; ++y)
+    for (int y = 0; y < Chunk::HEIGHT; ++y)
     {
         for (int z = -ChunkMeshSnapshot::Border;
              z < Chunk::DEPTH + ChunkMeshSnapshot::Border; ++z)

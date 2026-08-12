@@ -185,11 +185,6 @@ std::size_t ChunkManager::getChunkCount() const noexcept
     return chunks_.size();
 }
 
-void ChunkManager::reserve(std::size_t count)
-{
-    chunks_.reserve(count);
-}
-
 ChunkManager::ChunkKey ChunkManager::makeKey(int chunkX, int chunkZ) noexcept
 {
     const auto x = static_cast<std::uint32_t>(chunkX);

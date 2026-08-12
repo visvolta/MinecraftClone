@@ -213,17 +213,16 @@ LightingSystem::UpdatedChunk LightingSystem::rebuildChunkLighting(
         );
     };
 
-    chunk.fillSkyLight(15);
-    chunk.fillBlockLight(0);
+    chunk.clearLighting();
 
-    // All voxels above the maintained surface height are air and therefore
-    // already have exact skylight 15.
+    // Beta-style vertical skylight: starts at 15 and is reduced by block
+    // opacity while descending. Fully opaque blocks stop the column.
     for (int x = 0; x < Chunk::WIDTH; ++x)
     {
         for (int z = 0; z < Chunk::DEPTH; ++z)
         {
             int level = 15;
-            for (int y = chunk.getWorldSurfaceHeight(x, z) - 1; y >= 0; --y)
+            for (int y = Chunk::HEIGHT - 1; y >= 0; --y)
             {
                 const int attenuation = blockOpacity(
                     chunk.getBlock(x, y, z)

@@ -24,7 +24,6 @@ public:
 
     int chunkX = 0;
     int chunkZ = 0;
-    int copiedMaximumY = Chunk::HEIGHT - 1;
     std::array<mc::content::BlockState, SampleCount> states{};
     std::array<std::uint8_t, SampleCount> skyLight{};
     std::array<std::uint8_t, SampleCount> blockLight{};

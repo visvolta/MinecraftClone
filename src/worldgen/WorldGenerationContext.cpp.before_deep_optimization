@@ -47,13 +47,10 @@ WorldGenerationContext::WorldGenerationContext(
     HeightSampler heightSampler,
     ClimateSampler climateSampler)
     : targetChunk_(targetChunk),
-      targetOriginX_(targetChunk.getWorldOriginX()),
-      targetOriginZ_(targetChunk.getWorldOriginZ()),
       fallbackSampler_(std::move(fallbackSampler)),
       heightSampler_(std::move(heightSampler)),
       climateSampler_(std::move(climateSampler))
 {
-    stagedFeatureBlocks_.reserve(1024);
 }
 
 BlockType WorldGenerationContext::getBlock(
@@ -92,9 +89,9 @@ mc::content::BlockState WorldGenerationContext::getBlockState(
     if (isInsideTarget(worldX, worldY, worldZ))
     {
         return targetChunk_.getBlockState(
-            worldX - targetOriginX_,
+            worldX - targetChunk_.getWorldOriginX(),
             worldY,
-            worldZ - targetOriginZ_);
+            worldZ - targetChunk_.getWorldOriginZ());
     }
 
     return fallbackSampler_
@@ -108,10 +105,10 @@ bool WorldGenerationContext::isInsideTarget(
     int worldZ) const noexcept
 {
     return worldY >= 0 && worldY < Chunk::HEIGHT &&
-           worldX >= targetOriginX_ &&
-           worldX < targetOriginX_ + Chunk::WIDTH &&
-           worldZ >= targetOriginZ_ &&
-           worldZ < targetOriginZ_ + Chunk::DEPTH;
+           worldX >= targetChunk_.getWorldOriginX() &&
+           worldX < targetChunk_.getWorldOriginX() + Chunk::WIDTH &&
+           worldZ >= targetChunk_.getWorldOriginZ() &&
+           worldZ < targetChunk_.getWorldOriginZ() + Chunk::DEPTH;
 }
 
 bool WorldGenerationContext::setBlock(
@@ -143,9 +140,9 @@ bool WorldGenerationContext::setBlockState(
         return false;
 
     return targetChunk_.setBlockState(
-        worldX - targetOriginX_,
+        worldX - targetChunk_.getWorldOriginX(),
         worldY,
-        worldZ - targetOriginZ_,
+        worldZ - targetChunk_.getWorldOriginZ(),
         state);
 }
 
@@ -164,9 +161,9 @@ void WorldGenerationContext::finishIsolatedFeature(bool commit)
             if (!isInsideTarget(position.x, position.y, position.z))
                 continue;
             targetChunk_.setBlockState(
-                position.x - targetOriginX_,
+                position.x - targetChunk_.getWorldOriginX(),
                 position.y,
-                position.z - targetOriginZ_,
+                position.z - targetChunk_.getWorldOriginZ(),
                 state);
         }
     }
@@ -215,13 +212,13 @@ ClimateSample WorldGenerationContext::sampleClimate(
     if (climateSampler_)
         return climateSampler_(worldX, worldZ);
 
-    if (worldX >= targetOriginX_ &&
-        worldX < targetOriginX_ + Chunk::WIDTH &&
-        worldZ >= targetOriginZ_ &&
-        worldZ < targetOriginZ_ + Chunk::DEPTH)
+    if (worldX >= targetChunk_.getWorldOriginX() &&
+        worldX < targetChunk_.getWorldOriginX() + Chunk::WIDTH &&
+        worldZ >= targetChunk_.getWorldOriginZ() &&
+        worldZ < targetChunk_.getWorldOriginZ() + Chunk::DEPTH)
     {
-        const int localX = worldX - targetOriginX_;
-        const int localZ = worldZ - targetOriginZ_;
+        const int localX = worldX - targetChunk_.getWorldOriginX();
+        const int localZ = worldZ - targetChunk_.getWorldOriginZ();
         return {
             targetChunk_.getTemperature(localX, localZ),
             targetChunk_.getHumidity(localX, localZ),
@@ -229,9 +226,9 @@ ClimateSample WorldGenerationContext::sampleClimate(
     }
 
     const int localX = std::clamp(
-        worldX - targetOriginX_, 0, Chunk::WIDTH - 1);
+        worldX - targetChunk_.getWorldOriginX(), 0, Chunk::WIDTH - 1);
     const int localZ = std::clamp(
-        worldZ - targetOriginZ_, 0, Chunk::DEPTH - 1);
+        worldZ - targetChunk_.getWorldOriginZ(), 0, Chunk::DEPTH - 1);
     return {
         targetChunk_.getTemperature(localX, localZ),
         targetChunk_.getHumidity(localX, localZ),

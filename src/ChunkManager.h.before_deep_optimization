@@ -59,27 +59,6 @@ public:
     [[nodiscard]] std::vector<Chunk*> getChunks();
     [[nodiscard]] std::vector<const Chunk*> getChunks() const;
     [[nodiscard]] std::size_t getChunkCount() const noexcept;
-    void reserve(std::size_t count);
-
-    template<typename Function>
-    void forEachChunk(Function&& function)
-    {
-        for (auto& [key, chunk] : chunks_)
-        {
-            static_cast<void>(key);
-            function(chunk.get());
-        }
-    }
-
-    template<typename Function>
-    void forEachChunk(Function&& function) const
-    {
-        for (const auto& [key, chunk] : chunks_)
-        {
-            static_cast<void>(key);
-            function(chunk.get());
-        }
-    }
 
 private:
     using ChunkKey = std::uint64_t;

@@ -75,10 +75,10 @@ float FarmingSystem::cropGrowthChance(
 
 void FarmingSystem::tick(World& world)
 {
-    world.getChunkManager().forEachChunk([&](Chunk* chunk)
+    for (Chunk* chunk : world.getChunkManager().getChunks())
     {
         if (chunk == nullptr)
-            return;
+            continue;
         const int originX = chunk->getChunkX() * Chunk::WIDTH;
         const int originZ = chunk->getChunkZ() * Chunk::DEPTH;
         for (int section = 0; section < Chunk::SECTION_COUNT; ++section)
@@ -134,6 +134,6 @@ void FarmingSystem::tick(World& world)
                 }
             }
         }
-    });
+    }
 }
 }

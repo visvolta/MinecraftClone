@@ -46,22 +46,8 @@ bool Chunk::setBlockState(
     if (old.isAir() && !state.isAir()) ++nonAirPerSection[section];
     if (!old.isAir() && state.isAir()) --nonAirPerSection[section];
     sections_[section].set(localIndex, state);
-    if (!bulkBlockUpdate_)
-        updateHeightmaps(x, y, z, old, state);
+    updateHeightmaps(x, y, z, old, state);
     return true;
-}
-
-void Chunk::beginBulkBlockUpdate() noexcept
-{
-    bulkBlockUpdate_ = true;
-}
-
-void Chunk::endBulkBlockUpdate()
-{
-    if (!bulkBlockUpdate_)
-        return;
-    bulkBlockUpdate_ = false;
-    rebuildDerivedBlockData();
 }
 
 BlockType Chunk::getBlock(int x, int y, int z) const
@@ -150,16 +136,6 @@ void Chunk::setBiome(int x, int z, BiomeId biome)
         setClimate(x, z, definition->temperature, definition->rainfall);
 }
 
-void Chunk::setBiomeAndClimate(
-    int x, int z, BiomeId biome, float temperature, float humidity)
-{
-    if (x < 0 || x >= WIDTH || z < 0 || z >= DEPTH) return;
-    const std::size_t i = columnIndex(x, z);
-    biomeIds[i] = biome;
-    temperatures[i] = std::clamp(temperature, -0.5f, 2.0f);
-    humidities[i] = std::clamp(humidity, 0.0f, 1.0f);
-}
-
 BiomeId Chunk::getBiome(int x, int z) const
 {
     if (x < 0 || x >= WIDTH || z < 0 || z >= DEPTH)
@@ -213,6 +189,7 @@ ChunkSnapshot Chunk::snapshot() const
     result.biomeIds = biomeIds;
     result.worldSurfaceHeight = worldSurfaceHeight;
     result.motionBlockingHeight = motionBlockingHeight;
+    result.palette.clear();
     result.paletteIndices.resize(BLOCK_COUNT);
 
     std::unordered_map<
@@ -220,39 +197,25 @@ ChunkSnapshot Chunk::snapshot() const
         std::uint16_t,
         mc::content::BlockStateHash
     > reverse;
-    reverse.reserve(64);
-
-    for (int sectionY = 0; sectionY < SECTION_COUNT; ++sectionY)
+    for (int y = 0; y < HEIGHT; ++y)
     {
-        const auto& storage = sections_[static_cast<std::size_t>(sectionY)];
-        const auto& localPalette = storage.palette();
-        const auto& localIndices = storage.indices();
-        std::vector<std::uint16_t> remap(localPalette.size());
-
-        for (std::size_t local = 0; local < localPalette.size(); ++local)
+        for (int z = 0; z < DEPTH; ++z)
         {
-            const mc::content::BlockState value = localPalette[local];
-            auto found = reverse.find(value);
-            if (found == reverse.end())
+            for (int x = 0; x < WIDTH; ++x)
             {
-                const std::uint16_t global =
-                    static_cast<std::uint16_t>(result.palette.size());
-                result.palette.push_back(value);
-                found = reverse.emplace(value, global).first;
-            }
-            remap[local] = found->second;
-        }
-
-        const int baseY = sectionY * SECTION_HEIGHT;
-        for (int localY = 0; localY < SECTION_HEIGHT; ++localY)
-            for (int z = 0; z < DEPTH; ++z)
-                for (int x = 0; x < WIDTH; ++x)
+                const mc::content::BlockState state = getBlockState(x, y, z);
+                auto found = reverse.find(state);
+                if (found == reverse.end())
                 {
-                    const std::size_t local = static_cast<std::size_t>(
-                        x + WIDTH * (z + DEPTH * localY));
-                    result.paletteIndices[index(x, baseY + localY, z)] =
-                        remap[localIndices[local]];
+                    const auto paletteIndex = static_cast<std::uint16_t>(
+                        result.palette.size()
+                    );
+                    result.palette.push_back(state);
+                    found = reverse.emplace(state, paletteIndex).first;
                 }
+                result.paletteIndices[index(x, y, z)] = found->second;
+            }
+        }
     }
     return result;
 }
@@ -319,64 +282,11 @@ void Chunk::clearLighting()
     blockLight.fill(0);
 }
 
-void Chunk::fillSkyLight(std::uint8_t level) noexcept
-{
-    skyLight.fill(std::min<std::uint8_t>(level, 15));
-}
-
-void Chunk::fillBlockLight(std::uint8_t level) noexcept
-{
-    blockLight.fill(std::min<std::uint8_t>(level, 15));
-}
-
 const std::array<std::uint8_t, Chunk::BLOCK_COUNT>&
 Chunk::skyLightData() const noexcept { return skyLight; }
 
 const std::array<std::uint8_t, Chunk::BLOCK_COUNT>&
 Chunk::blockLightData() const noexcept { return blockLight; }
-
-void Chunk::rebuildDerivedBlockData()
-{
-    nonAirPerSection.fill(0);
-    worldSurfaceHeight.fill(0);
-    motionBlockingHeight.fill(0);
-
-    for (int sectionY = 0; sectionY < SECTION_COUNT; ++sectionY)
-    {
-        const auto& storage = sections_[static_cast<std::size_t>(sectionY)];
-        std::uint16_t count = 0;
-        for (const auto paletteIndex : storage.indices())
-            if (!storage.palette()[paletteIndex].isAir())
-                ++count;
-        nonAirPerSection[static_cast<std::size_t>(sectionY)] = count;
-    }
-
-    for (int z = 0; z < DEPTH; ++z)
-        for (int x = 0; x < WIDTH; ++x)
-        {
-            bool surfaceFound = false;
-            bool motionFound = false;
-            const std::size_t column = columnIndex(x, z);
-            for (int y = HEIGHT - 1; y >= 0; --y)
-            {
-                const auto state = getBlockState(x, y, z);
-                if (!surfaceFound && !state.isAir())
-                {
-                    worldSurfaceHeight[column] =
-                        static_cast<std::uint16_t>(y + 1);
-                    surfaceFound = true;
-                }
-                if (!motionFound && stateIsSolid(state))
-                {
-                    motionBlockingHeight[column] =
-                        static_cast<std::uint16_t>(y + 1);
-                    motionFound = true;
-                }
-                if (surfaceFound && motionFound)
-                    break;
-            }
-        }
-}
 
 void Chunk::updateHeightmaps(
     int x,

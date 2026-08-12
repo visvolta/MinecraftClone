@@ -47,16 +47,15 @@ int RedstoneSystem::incomingPower(
             x + offset[0], y + offset[1], z + offset[2]
         );
         if (state.block() == BlockType::Lever && (state.properties() & 1U) != 0U)
-            return 15;
-        if (state.block() == BlockType::RedstoneTorch &&
-            (state.properties() & 1U) != 0U)
-            return 15;
-        if (state.block() == BlockType::Repeater &&
-            (state.properties() & 1U) != 0U)
-            return 15;
-        if (state.block() == BlockType::RedstoneWire)
-            power = std::max(
-                power, std::max(0, static_cast<int>(state.properties()) - 1));
+            power = 15;
+        else if (state.block() == BlockType::RedstoneTorch &&
+                 (state.properties() & 1U) != 0U)
+            power = 15;
+        else if (state.block() == BlockType::Repeater &&
+                 (state.properties() & 1U) != 0U)
+            power = 15;
+        else if (state.block() == BlockType::RedstoneWire)
+            power = std::max(power, std::max(0, static_cast<int>(state.properties()) - 1));
     }
     return power;
 }

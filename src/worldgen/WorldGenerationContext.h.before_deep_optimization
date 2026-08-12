@@ -87,8 +87,6 @@ private:
     };
 
     Chunk& targetChunk_;
-    int targetOriginX_ = 0;
-    int targetOriginZ_ = 0;
     StateFallbackSampler fallbackSampler_;
     HeightSampler heightSampler_;
     ClimateSampler climateSampler_;

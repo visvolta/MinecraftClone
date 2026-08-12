@@ -69,23 +69,18 @@ void drawVisibleSections(
 mc::content::BlockState ChunkMeshSnapshot::getBlockState(
     int x, int y, int z) const noexcept
 {
-    if (y < 0 || y > copiedMaximumY)
-        return {};
     return states[index(x, y, z)];
 }
 
 std::uint8_t ChunkMeshSnapshot::getSkyLight(
     int x, int y, int z) const noexcept
 {
-    if (y < 0) return 0;
-    if (y > copiedMaximumY) return 15;
     return skyLight[index(x, y, z)];
 }
 
 std::uint8_t ChunkMeshSnapshot::getBlockLight(
     int x, int y, int z) const noexcept
 {
-    if (y < 0 || y > copiedMaximumY) return 0;
     return blockLight[index(x, y, z)];
 }
 

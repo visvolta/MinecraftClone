@@ -37,17 +37,6 @@ int main()
     assert(lit->getBlockLight(4, 50, 4) == 15);
     assert(lit->getBlockLight(5, 50, 4) == 14);
 
-    Chunk bulk(2, -3);
-    bulk.beginBulkBlockUpdate();
-    bulk.setBlock(1, 20, 1, BlockType::Stone);
-    bulk.setBlock(1, 21, 1, BlockType::Grass);
-    bulk.setBlock(5, 70, 5, BlockType::OakLog);
-    bulk.endBulkBlockUpdate();
-    assert(bulk.getWorldSurfaceHeight(1, 1) == 22);
-    assert(bulk.getMotionBlockingHeight(5, 5) == 71);
-    const ChunkSnapshot snap = bulk.snapshot();
-    assert(snap.paletteIndices.size() == Chunk::BLOCK_COUNT);
-
     // Rebuilding an unchanged chunk must not invalidate its mesh again.
     lighting.queueChunk(0, 0);
     const auto unchanged = lighting.process(chunks, 1000.0);

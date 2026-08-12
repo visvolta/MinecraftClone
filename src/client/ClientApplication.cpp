@@ -1203,6 +1203,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             glDepthMask(GL_TRUE);
             const Frustum frustum(projection * view);
             world->drawOpaque(frustum);
+            
 
             // Both leaf modes are alpha-tested, depth-writing geometry. Fast
             // mode uses its culled opaque-volume mesh; fancy mode preserves
@@ -1223,12 +1224,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 itemAtlas,
                 atmosphereState
             );
-            if (!inventoryUI.isOpen())
-            {
-                const ItemStack& heldStack = inventory.getSlot(inventory.getSelectedHotbarSlot());
-                glClear(GL_DEPTH_BUFFER_BIT);
-                itemEntities.drawHeld(heldStack,projection,blockAtlas,itemAtlas,atmosphereState);
-            }
+
             mobEntityRenderer.draw(
                 mobEntities.entities(),
                 partialGameTick,
@@ -1295,7 +1291,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
             glDisable(GL_BLEND);
             glDepthMask(GL_TRUE);
             glDisable(GL_CULL_FACE);
-            world->drawLava();
+            
 
             // Water is the only blended block pass. Chunks are rendered back
             // to front and depth writes remain disabled, while lava/terrain

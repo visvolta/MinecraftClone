@@ -84,11 +84,16 @@ void BlockDamageOverlay::draw(
     textures_[static_cast<std::size_t>(stage)]->bind(0);
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
+    glBlendFuncSeparate(
+        GL_DST_COLOR,
+        GL_SRC_COLOR,
+        GL_ONE,
+        GL_ZERO
+    );
     glDepthMask(GL_FALSE);
     glEnable(GL_CULL_FACE);
     glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(-1.0f, -1.0f);
+    glPolygonOffset(-3.0f, -3.0f);
 
     glBindVertexArray(vertexArray_);
     glDrawArrays(GL_TRIANGLES, 0, vertexCount_);

@@ -5,7 +5,7 @@
 #include "FluidSystem.h"
 #include "Inventory.h"
 #include "Player.h"
-#include "entity/MobEntity.h"
+#include "entity/MobPersist.h"
 
 #include <cstdint>
 #include <filesystem>

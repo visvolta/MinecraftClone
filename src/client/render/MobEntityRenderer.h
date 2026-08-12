@@ -14,7 +14,7 @@
 class Shader;
 class Texture2D;
 struct AtmosphereState;
-namespace mc::entity { class MobEntity; }
+namespace mc::entity { class Mob; }
 
 namespace mc::client
 {
@@ -28,7 +28,7 @@ public:
     MobEntityRenderer& operator=(const MobEntityRenderer&) = delete;
 
     void draw(
-        std::span<const entity::MobEntity> entities,
+        std::span<entity::Mob* const> entities,
         float partialTick,
         const glm::mat4& view,
         const glm::mat4& projection,

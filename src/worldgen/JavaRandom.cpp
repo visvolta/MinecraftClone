@@ -1,6 +1,7 @@
 #include "worldgen/JavaRandom.h"
 
 #include <bit>
+#include <cmath>
 #include <stdexcept>
 
 namespace
@@ -86,4 +87,27 @@ double JavaRandom::nextDouble()
 bool JavaRandom::nextBoolean()
 {
     return next(1) != 0;
+}
+
+double JavaRandom::nextGaussian()
+{
+    if (haveNextNextGaussian_)
+    {
+        haveNextNextGaussian_ = false;
+        return nextNextGaussian_;
+    }
+    double v1 = 0.0;
+    double v2 = 0.0;
+    double s = 0.0;
+    do
+    {
+        v1 = 2.0 * nextDouble() - 1.0;
+        v2 = 2.0 * nextDouble() - 1.0;
+        s = v1 * v1 + v2 * v2;
+    }
+    while (s >= 1.0 || s == 0.0);
+    const double multiplier = std::sqrt(-2.0 * std::log(s) / s);
+    nextNextGaussian_ = v2 * multiplier;
+    haveNextNextGaussian_ = true;
+    return v1 * multiplier;
 }

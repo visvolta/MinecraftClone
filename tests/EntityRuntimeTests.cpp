@@ -2,6 +2,11 @@
 #include "content/BlockState.h"
 #include "entity/ai/Goal.h"
 #include "entity/navigation/PathNavigation.h"
+#include "entity/CombatRules.h"
+#include "entity/attributes/AttributeMap.h"
+#include "entity/attributes/AttributeModifier.h"
+#include "entity/attributes/SharedMonsterAttributes.h"
+#include "entity/EntityUuid.h"
 #include "game/GameBootstrap.h"
 #include "gameplay/GameplayRegistries.h"
 
@@ -169,4 +174,22 @@ int main()
            mc::gameplay::TameableKind::Donkey);
     assert(mule && mule->tameableKind ==
            mc::gameplay::TameableKind::Mule);
+
+    using mc::entity::CombatRules;
+    const float absorbed = CombatRules::getDamageAfterAbsorb(10.0f, 20.0f, 0.0f);
+    assert(absorbed > 0.0f && absorbed < 10.0f);
+    const float magic = CombatRules::getDamageAfterMagicAbsorb(10.0f, 10.0f);
+    assert(std::abs(magic - 6.0f) < 0.001f);
+
+    mc::entity::AttributeMap map;
+    map.registerAttribute(mc::entity::SharedMonsterAttributes::MAX_HEALTH)
+        .setBaseValue(20.0);
+    assert(std::abs(map.getAttributeValue(
+        mc::entity::SharedMonsterAttributes::MAX_HEALTH) - 20.0) < 0.001);
+    map.getAttributeInstance(mc::entity::SharedMonsterAttributes::MAX_HEALTH)
+        ->applyModifier(mc::entity::AttributeModifier(
+            mc::entity::EntityUuid{1, 2}, "bonus", 4.0,
+            mc::entity::AttributeModifier::Operation::Add));
+    assert(std::abs(map.getAttributeValue(
+        mc::entity::SharedMonsterAttributes::MAX_HEALTH) - 24.0) < 0.001);
 }

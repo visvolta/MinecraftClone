@@ -47,7 +47,10 @@
 #include "client/ClientApplication.h"
 #include "content/resources/ResourcePack.h"
 #include "engine/FixedStepClock.h"
-#include "entity/MobEntityManager.h"
+#include "entity/Mob.h"
+#include "entity/AnimalEntity.h"
+#include "entity/spawn/MobFactory.h"
+#include "entity/MobPersist.h"
 #include "game/GameBootstrap.h"
 #include "worldgen/BiomeMap.h"
 #include "worldgen/SurfaceBuilder.h"
@@ -230,7 +233,6 @@ namespace
         const World& world,
         const Player& player,
         const Inventory& inventory,
-        const mc::entity::MobEntityManager& mobEntities,
         const Atmosphere& atmosphere,
         const glm::vec3& spawnFeetPosition)
     {
@@ -249,7 +251,24 @@ namespace
         data.modifiedChunks = world.getModifiedChunkSnapshots();
         data.blockEntities = world.getBlockEntitySnapshots();
         data.fluidTicks = world.getScheduledFluidTickSnapshots();
-        data.mobs = mobEntities.persistentStates();
+        for (mc::entity::Mob* mob : world.getMobs())
+        {
+            if (!mob || !mob->isAlive())
+                continue;
+            mc::entity::MobPersistentState state;
+            state.type = mob->getType();
+            state.uuid = mob->uuid();
+            state.position = mob->getPositionVec();
+            state.velocity = {
+                static_cast<float>(mob->motionX),
+                static_cast<float>(mob->motionY),
+                static_cast<float>(mob->motionZ)
+            };
+            state.yaw = mob->rotationYaw;
+            state.health = mob->getHealth();
+            state.ticksExisted = mob->getTicksExisted();
+            data.mobs.push_back(state);
+        }
         return data;
     }
 
@@ -474,7 +493,6 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         PlayerHUD playerHUD;
         DeathScreen deathScreen;
         ItemEntityManager itemEntities;
-        mc::entity::MobEntityManager mobEntities(gameBootstrap.gameplay());
         mc::client::MobEntityRenderer mobEntityRenderer;
         std::mt19937 mobLootRandom(1122U);
         SkyRenderer skyRenderer;
@@ -584,11 +602,29 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         // gameplay distance then streams in asynchronously.
         world->setRenderDistance(gameplayRenderDistance);
 
-        Player player(restoreSavedPlayer ? initialLoadPosition : spawnFeetPosition);
+        Player player(*world, restoreSavedPlayer ? initialLoadPosition : spawnFeetPosition);
+        world->setPlayer(&player);
         if (restoreSavedPlayer)
             player.restorePersistentState(loadedSave->player);
         if (loadedSave)
-            mobEntities.restorePersistentStates(loadedSave->mobs);
+        {
+            world->setWorldTime(loadedSave->worldTime);
+            for (const auto& state : loadedSave->mobs)
+            {
+                auto mob = mc::entity::createMob(state.type, *world);
+                if (!mob)
+                    continue;
+                mob->setUuid(state.uuid);
+                mob->setLocationAndAngles(
+                    state.position.x, state.position.y, state.position.z,
+                    state.yaw, 0.0f);
+                mob->setHealth(state.health);
+                mob->motionX = state.velocity.x;
+                mob->motionY = state.velocity.y;
+                mob->motionZ = state.velocity.z;
+                world->spawnEntity(std::move(mob));
+            }
+        }
         camera.setPosition(player.getEyePosition());
 
         std::cout << "Chunks: " << world->getLoadedChunkCount()
@@ -644,37 +680,14 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     player,
                     inventory
                 );
-                mobEntities.tick(
-                    *world, player, atmosphere.getWorldTime(),
-                    inventory.getSelectedItem()
-                );
-                for (const mc::entity::MobInteractionDrop& drop :
-                     mobEntities.takeInteractionDrops())
-                    itemEntities.spawnMobDrop(drop.stack, drop.position);
-                for (const mc::entity::MobDeath& death :
-                     mobEntities.takeDeaths())
-                {
-                    for (const auto& drop : resourcePack.rollLootTable(
-                             death.lootTable,
-                             {
-                                 .killedByPlayer = death.killedByPlayer,
-                                 .onFire = false,
-                                 .lootingLevel = 0,
-                                 .luck = 0.0f
-                             },
-                             mobLootRandom))
-                    {
-                        if (const auto stack = legacyLootStack(
-                                drop, gameBootstrap.content()))
-                            itemEntities.spawnMobDrop(*stack, death.position);
-                    }
-                }
+                player.setHeldItemType(inventory.getSelectedItem());
                 atmosphere.tick(*world, player.getEyePosition());
+                atmosphere.setWorldTime(world->getWorldTime());
 
                 if (gameTick % 600 == 0)
                 {
                     const GameSaveData data = captureSaveData(
-                        *world, player, inventory, mobEntities, atmosphere,
+                        *world, player, inventory, atmosphere,
                         spawnFeetPosition
                     );
                     if (!SaveGame::save(
@@ -778,7 +791,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 }
             }
             player.survival().setArmor(armorPoints, armorToughness);
-            player.update(window, deltaTime, *world, camera);
+            player.update(window, deltaTime, camera);
             world->setFastLeavesEnabled(fastLeaves);
             world->update(player.getPosition());
 
@@ -863,15 +876,38 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 1.0f,
                 1.0f + inventory.getSelectedToolProperties().miningSpeed * 0.25f
             );
-            const bool attackedEntity = leftMousePressed &&
-                !leftMouseWasPressed &&
-                mobEntities.attackNearest(
-                    camera.getPosition(),
-                    camera.getForward(),
-                    targetedBlock.hit ? targetedBlock.distance : blockReach,
-                    baseAttackDamage *
-                        (0.2f + attackStrength * attackStrength * 0.8f)
-                );
+            bool attackedEntity = false;
+            if (leftMousePressed && !leftMouseWasPressed)
+            {
+                const float reach = targetedBlock.hit ? targetedBlock.distance : blockReach;
+                const glm::vec3 origin = camera.getPosition();
+                const glm::vec3 dir = glm::normalize(camera.getForward());
+                mc::entity::Mob* nearest = nullptr;
+                float nearestDist = reach;
+                for (mc::entity::Mob* mob : world->getMobs())
+                {
+                    if (!mob || !mob->isAlive())
+                        continue;
+                    const glm::vec3 to = mob->getPositionVec() + glm::vec3(0, mob->getHeight()*0.5f, 0) - origin;
+                    const float along = glm::dot(to, dir);
+                    if (along < 0.0f || along > nearestDist)
+                        continue;
+                    const glm::vec3 closest = origin + dir * along;
+                    const glm::vec3 delta = mob->getPositionVec() + glm::vec3(0, mob->getHeight()*0.5f, 0) - closest;
+                    if (glm::dot(delta, delta) > 1.0f)
+                        continue;
+                    nearest = mob;
+                    nearestDist = along;
+                }
+                if (nearest)
+                {
+                    const float dmg = baseAttackDamage *
+                        (0.2f + attackStrength * attackStrength * 0.8f);
+                    nearest->attackEntityFrom(
+                        mc::entity::DamageSource::causePlayerDamage(player), dmg);
+                    attackedEntity = true;
+                }
+            }
             if (attackedEntity)
                 player.resetAttackCooldown();
 
@@ -924,14 +960,29 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 ItemStack& held = inventory.getSlot(
                     inventory.getSelectedHotbarSlot()
                 );
-                interactedEntity = mobEntities.interactNearest(
-                    camera.getPosition(), camera.getForward(),
-                    targetedBlock.hit ? targetedBlock.distance : blockReach,
-                    player, held
-                );
-                for (const mc::entity::MobInteractionDrop& drop :
-                     mobEntities.takeInteractionDrops())
-                    itemEntities.spawnMobDrop(drop.stack, drop.position);
+                {
+                    const float reach = targetedBlock.hit ? targetedBlock.distance : blockReach;
+                    const glm::vec3 origin = camera.getPosition();
+                    const glm::vec3 dir = glm::normalize(camera.getForward());
+                    mc::entity::Mob* nearest = nullptr;
+                    float nearestDist = reach;
+                    for (mc::entity::Mob* mob : world->getMobs())
+                    {
+                        if (!mob || !mob->isAlive())
+                            continue;
+                        const glm::vec3 to = mob->getPositionVec() - origin;
+                        const float along = glm::dot(to, dir);
+                        if (along < 0.0f || along > nearestDist)
+                            continue;
+                        nearest = mob;
+                        nearestDist = along;
+                    }
+                    if (nearest)
+                    {
+                        if (auto* animal = dynamic_cast<mc::entity::AnimalEntity*>(nearest))
+                            interactedEntity = animal->processInteract(player, held);
+                    }
+                }
                 const ItemProperties& item = getItemProperties(held.item);
                 if (!interactedEntity && !held.empty() && item.foodPoints > 0 &&
                     player.survival().foodLevel() < 20)
@@ -1225,8 +1276,9 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 atmosphereState
             );
 
+            const auto mobs = world->getMobs();
             mobEntityRenderer.draw(
-                mobEntities.entities(),
+                mobs,
                 partialGameTick,
                 view,
                 projection,
@@ -1418,7 +1470,6 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                 player.respawn(spawnFeetPosition);
                 inventory = Inventory{};
                 itemEntities.clear();
-                mobEntities.clear();
                 atmosphere.setWorldTime(0);
                 camera.setPosition(player.getEyePosition());
                 camera.resetMouseTracking();
@@ -1443,11 +1494,11 @@ int mc::client::ClientApplication::run(int argc, char** argv)
                     );
                 }
 
+                world->setPlayer(&player);
                 const GameSaveData freshSave = captureSaveData(
                     *world,
                     player,
                     inventory,
-                    mobEntities,
                     atmosphere,
                     spawnFeetPosition
                 );
@@ -1473,7 +1524,7 @@ int mc::client::ClientApplication::run(int argc, char** argv)
         }
 
         const GameSaveData finalSave = captureSaveData(
-            *world, player, inventory, mobEntities, atmosphere,
+            *world, player, inventory, atmosphere,
             spawnFeetPosition
         );
         if (!SaveGame::save(

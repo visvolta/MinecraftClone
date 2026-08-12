@@ -4,6 +4,14 @@
 #include "TerrainGenerator.h"
 #include "content/BlockStateLogic.h"
 #include "content/ContentCatalog.h"
+#include "content/resources/ResourcePack.h"
+#include "entity/Entity.h"
+#include "entity/Mob.h"
+#include "entity/PlayerEntity.h"
+#include "entity/item/ItemEntityEntity.h"
+#include "entity/item/XpOrbEntity.h"
+#include "entity/spawn/WorldEntitySpawner.h"
+#include "BlockShape.h"
 
 #include <algorithm>
 #include <array>
@@ -34,6 +42,7 @@ World::World(int renderDistance, int seed)
       seed_(seed),
       structureLocator_(seed),
       biomeLocator_(seed),
+      entityRandom_(seed),
       renderDistance_(std::max(0, renderDistance)),
       unloadDistance_(std::max(0, renderDistance) + 1)
 {
@@ -66,9 +75,12 @@ World::World(int renderDistance, int seed)
 
 void World::tick()
 {
+    ++worldTime_;
     fluidSystem_.tick();
     farmingSystem_.tick(*this);
     redstoneSystem_.tick(*this);
+    tickEntities();
+    mc::entity::WorldEntitySpawner::findChunksForSpawning(*this);
 
     struct FurnaceStateChange
     {

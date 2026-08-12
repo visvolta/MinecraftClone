@@ -15,9 +15,12 @@ public:
     [[nodiscard]] float nextFloat();
     [[nodiscard]] double nextDouble();
     [[nodiscard]] bool nextBoolean();
+    [[nodiscard]] double nextGaussian();
 
 private:
     std::uint64_t state_ = 0;
+    double nextNextGaussian_ = 0.0;
+    bool haveNextNextGaussian_ = false;
 
     [[nodiscard]] std::int32_t next(int bits);
 };

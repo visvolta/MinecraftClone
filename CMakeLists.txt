@@ -266,12 +266,41 @@ set(MINECRAFT_CLONE_SOURCES
     src/ItemEntityRenderer.cpp
     src/client/render/MobEntityRenderer.cpp
     src/entity/EntityUuid.cpp
-    src/entity/MobEntity.cpp
-    src/entity/MobEntityManager.cpp
+    src/entity/DamageSource.cpp
+    src/entity/Entity.cpp
+    src/entity/LivingEntity.cpp
+    src/entity/Mob.cpp
+    src/entity/Creature.cpp
+    src/entity/AgeableEntity.cpp
+    src/entity/AnimalEntity.cpp
+    src/entity/TameableEntity.cpp
+    src/entity/MonsterEntity.cpp
+    src/entity/attributes/SharedMonsterAttributes.cpp
+    src/entity/attributes/AttributeInstance.cpp
+    src/entity/attributes/AttributeMap.cpp
+    src/entity/helpers/LookHelper.cpp
+    src/entity/helpers/MoveHelper.cpp
+    src/entity/helpers/JumpHelper.cpp
+    src/entity/helpers/Senses.cpp
+    src/entity/helpers/BodyHelper.cpp
     src/entity/ai/Goal.cpp
-    src/entity/ai/MobAiController.cpp
+    src/entity/ai/VanillaGoals.cpp
     src/entity/navigation/PathNavigation.cpp
     src/entity/navigation/WorldNavigationBlockAccess.cpp
+    src/entity/projectile/ProjectileEntity.cpp
+    src/entity/projectile/ArrowEntity.cpp
+    src/entity/item/XpOrbEntity.cpp
+    src/entity/item/ItemEntityEntity.cpp
+    src/entity/spawn/MobFactory.cpp
+    src/entity/spawn/WorldEntitySpawner.cpp
+    src/entity/mobs/CreeperEntity.cpp
+    src/entity/mobs/ZombieEntity.cpp
+    src/entity/mobs/SkeletonEntity.cpp
+    src/entity/mobs/SpiderEntity.cpp
+    src/entity/mobs/SlimeEntity.cpp
+    src/entity/mobs/WitchEntity.cpp
+    src/entity/mobs/PassiveMobs.cpp
+    src/entity/mobs/TameableMobs.cpp
     src/Player.cpp
     src/PlayerHUD.cpp
     src/PostProcessor.cpp
@@ -280,6 +309,7 @@ set(MINECRAFT_CLONE_SOURCES
     src/SkyRenderer.cpp
     src/ToolProperties.cpp
     src/World.cpp
+    src/WorldEntities.cpp
 )
 
 add_executable(MinecraftClone ${MINECRAFT_CLONE_SOURCES})
@@ -386,6 +416,10 @@ if(BUILD_TESTING)
         tests/EntityRuntimeTests.cpp
         src/entity/ai/Goal.cpp
         src/entity/navigation/PathNavigation.cpp
+        src/entity/attributes/SharedMonsterAttributes.cpp
+        src/entity/attributes/AttributeInstance.cpp
+        src/entity/attributes/AttributeMap.cpp
+        src/entity/EntityUuid.cpp
     )
     target_include_directories(minecraft_entity_runtime_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src

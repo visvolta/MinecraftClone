@@ -19,7 +19,9 @@ enum class StatusEffectType : std::uint8_t
     WaterBreathing,
     Hunger,
     Weakness,
-    Poison
+    Poison,
+    JumpBoost,
+    Levitation
 };
 
 struct StatusEffect

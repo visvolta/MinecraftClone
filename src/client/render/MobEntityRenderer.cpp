@@ -4,7 +4,7 @@
 #include "Atmosphere.h"
 #include "Shader.h"
 #include "Texture2D.h"
-#include "entity/MobEntity.h"
+#include "entity/Mob.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -129,13 +129,12 @@ void appendCube(
 
 std::vector<Vertex> buildVertices(
     MobModelDefinition model,
-    const entity::MobEntity& entity,
+    const entity::Mob& entity,
     float partialTick)
 {
-    const entity::MobAnimationState animation =
-        entity.animationState(partialTick);
+    const entity::Mob::PoseState animation = entity.poseState(partialTick);
     animateMobModel(
-        entity.definition().model,
+        entity.getModelKind(),
         model,
         {
             animation.age, animation.limbSwing,
@@ -219,7 +218,7 @@ MobEntityRenderer::~MobEntityRenderer()
 }
 
 void MobEntityRenderer::draw(
-    std::span<const entity::MobEntity> entities,
+        std::span<entity::Mob* const> entities,
     float partialTick,
     const glm::mat4& view,
     const glm::mat4& projection,
@@ -240,9 +239,11 @@ void MobEntityRenderer::draw(
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     glBindVertexArray(vertexArray_);
-    for(const entity::MobEntity& entity:entities)
+    for(entity::Mob* pointer:entities)
     {
-        const MobModelDefinition& model=modelFor(entity.definition().model);
+        if(!pointer) continue;
+        const entity::Mob& entity=*pointer;
+        const MobModelDefinition& model=modelFor(entity.getModelKind());
         const std::vector<Vertex> vertices=buildVertices(
             model,entity,partialTick
         );
@@ -254,10 +255,10 @@ void MobEntityRenderer::draw(
             vertices.data(),GL_STREAM_DRAW
         );
         glm::mat4 transform(1.0f);
-        const entity::MobAnimationState animation =
-            entity.animationState(partialTick);
+        const entity::Mob::PoseState animation =
+            entity.poseState(partialTick);
         transform=glm::translate(
-            transform,entity.interpolatedPosition(partialTick)
+            transform,entity.getInterpolatedPosition(partialTick)
         );
         transform=glm::rotate(
             transform,entity.interpolatedYaw(partialTick),{0,1,0}
@@ -268,9 +269,9 @@ void MobEntityRenderer::draw(
             {0,0,1}
         );
         transform=glm::scale(
-            transform,glm::vec3(entity.renderScale())
+            transform,glm::vec3(entity.getRenderScale())
         );
-        if (entity.type().path() == "creeper")
+        if (entity.getType().path() == "creeper")
         {
             float swell = std::clamp(animation.attackProgress, 0.0f, 1.0f);
             const float pulse = 1.0f + std::sin(swell * 100.0f) * swell * 0.01f;
@@ -287,7 +288,7 @@ void MobEntityRenderer::draw(
             glm::vec3(1.0f), glm::vec3(1.0f,0.35f,0.35f),
             animation.hurtProgress
         );
-        const bool creeperFlash = entity.type().path() == "creeper" &&
+        const bool creeperFlash = entity.getType().path() == "creeper" &&
             static_cast<int>(animation.attackProgress * 10.0f) % 2 != 0;
         shader_->setVec3(
             "entityTint",
@@ -296,21 +297,21 @@ void MobEntityRenderer::draw(
                            animation.attackProgress * 0.2f)
                 : hurtTint
         );
-        textureFor(entity.texture()).bind(0);
+        textureFor(entity.getTexture()).bind(0);
         glDrawArrays(
             GL_TRIANGLES,0,static_cast<GLsizei>(vertices.size())
         );
-        if(hasOverlay(entity.overlayTexture()) && !entity.isSheared())
+        if(hasOverlay(entity.getOverlayTexture()) && !entity.isSheared())
         {
-            const float scale=overlayScale(entity.type());
+            const float scale=overlayScale(entity.getType());
             glm::mat4 overlay=glm::scale(
                 transform,glm::vec3(scale)
             );
             shader_->setMat4("model",overlay);
             shader_->setVec3(
-                "entityTint",entity.overlayColour()*hurtTint
+                "entityTint",entity.getOverlayColour()*hurtTint
             );
-            textureFor(entity.overlayTexture()).bind(0);
+            textureFor(entity.getOverlayTexture()).bind(0);
             glDepthMask(GL_FALSE);
             glDrawArrays(
                 GL_TRIANGLES,0,static_cast<GLsizei>(vertices.size())

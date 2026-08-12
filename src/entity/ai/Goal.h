@@ -5,12 +5,18 @@
 #include <memory>
 #include <vector>
 
+namespace mc::entity
+{
+class Mob;
+}
+
 namespace mc::entity::ai
 {
 class GoalContext
 {
 public:
     virtual ~GoalContext() = default;
+    [[nodiscard]] virtual ::mc::entity::Mob* mob() { return nullptr; }
 };
 
 // Port of EntityAIBase's lifecycle and control flags. 1.12 uses bit 1 for

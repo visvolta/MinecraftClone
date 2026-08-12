@@ -12,8 +12,22 @@
 #include "worldgen/StructureGenerator.h"
 #include "gameplay/FarmingSystem.h"
 #include "gameplay/RedstoneSystem.h"
+#include "entity/AxisAlignedBB.h"
+#include "entity/Difficulty.h"
+#include "entity/EnumCreatureType.h"
+#include "core/ResourceLocation.h"
+#include "worldgen/JavaRandom.h"
+#include "Item.h"
 
 #include <glm/glm.hpp>
+
+namespace mc::entity
+{
+class Entity;
+class LivingEntity;
+class PlayerEntity;
+class Mob;
+}
 
 #include <atomic>
 #include <condition_variable>
@@ -169,6 +183,49 @@ public:
     [[nodiscard]] double getLightingMilliseconds() const noexcept;
     [[nodiscard]] std::size_t getPendingFluidTickCount() const noexcept;
 
+    void setPlayer(mc::entity::PlayerEntity* player) noexcept;
+    [[nodiscard]] mc::entity::PlayerEntity* getPlayer() const noexcept;
+    mc::entity::Entity* spawnEntity(std::unique_ptr<mc::entity::Entity> entity);
+    void tickEntities();
+    [[nodiscard]] std::vector<mc::entity::Entity*> getEntitiesInAABB(
+        const mc::entity::AxisAlignedBB& box,
+        const mc::entity::Entity* exclude = nullptr) const;
+    [[nodiscard]] std::vector<mc::entity::Mob*> getMobs() const;
+    [[nodiscard]] std::vector<mc::entity::Entity*> getEntities() const;
+    [[nodiscard]] mc::entity::PlayerEntity* getClosestPlayer(
+        double x, double y, double z, double maxDistance) const;
+    [[nodiscard]] bool isAnyPlayerWithinRangeAt(
+        double x, double y, double z, double range) const;
+    [[nodiscard]] std::vector<mc::entity::AxisAlignedBB> getCollisionBoxes(
+        const mc::entity::Entity* entity,
+        const mc::entity::AxisAlignedBB& area) const;
+    [[nodiscard]] bool canSeeSky(int x, int y, int z) const;
+    [[nodiscard]] float getLightBrightness(int x, int y, int z) const;
+    [[nodiscard]] bool isDaytime() const;
+    [[nodiscard]] mc::entity::Difficulty getDifficulty() const noexcept;
+    void setDifficulty(mc::entity::Difficulty difficulty) noexcept;
+    [[nodiscard]] std::uint64_t getWorldTime() const noexcept;
+    void setWorldTime(std::uint64_t time) noexcept;
+    void spawnXpOrbs(double x, double y, double z, int amount);
+    void dropLootTable(
+        const mc::core::ResourceLocation& table,
+        double x,
+        double y,
+        double z,
+        bool killedByPlayer
+    );
+    void spawnItemStack(
+        const ItemStack& stack,
+        double x,
+        double y,
+        double z,
+        const glm::vec3& velocity = {}
+    );
+    [[nodiscard]] int countMobs(mc::entity::EnumCreatureType type) const;
+    [[nodiscard]] JavaRandom& entityRandom() noexcept;
+    void restoreEntities(std::vector<std::unique_ptr<mc::entity::Entity>> entities);
+    [[nodiscard]] std::vector<mc::entity::Entity*> takePersistentEntities();
+
 private:
     using ChunkKey = std::uint64_t;
 
@@ -248,6 +305,13 @@ private:
     double meshMilliseconds_ = 0.0;
     double uploadMilliseconds_ = 0.0;
     double worldUpdateMilliseconds_ = 0.0;
+
+    std::vector<std::unique_ptr<mc::entity::Entity>> entities_;
+    mc::entity::PlayerEntity* player_ = nullptr;
+    mc::entity::Difficulty difficulty_ = mc::entity::Difficulty::Normal;
+    std::uint64_t worldTime_ = 0;
+    JavaRandom entityRandom_{1337};
+    int spawnHostileTimer_ = 0;
 
     void refreshDesiredChunks(int centerChunkX, int centerChunkZ);
     void initializeGeneratedBlockEntities(const Chunk& chunk);

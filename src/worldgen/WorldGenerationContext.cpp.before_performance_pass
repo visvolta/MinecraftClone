@@ -174,7 +174,7 @@ void WorldGenerationContext::finishIsolatedFeature(bool commit)
 
 int WorldGenerationContext::getHeightValue(int worldX, int worldZ) const
 {
-    if (!isolatedFeatureActive_ && heightSampler_)
+    if (heightSampler_)
         return heightSampler_(worldX, worldZ);
 
     for (int y = Chunk::HEIGHT - 1; y >= 0; --y)
@@ -191,9 +191,6 @@ int WorldGenerationContext::getHeightValue(int worldX, int worldZ) const
 int WorldGenerationContext::getTopSolidOrLiquidBlockY(
     int worldX, int worldZ) const
 {
-    if (!isolatedFeatureActive_ && heightSampler_)
-        return heightSampler_(worldX, worldZ);
-
     // World#getTopSolidOrLiquidBlock scans downward to the first material
     // that blocks movement, excluding leaves, and returns the block ABOVE it.
     for(int y = Chunk::HEIGHT - 1; y >= 0; --y)

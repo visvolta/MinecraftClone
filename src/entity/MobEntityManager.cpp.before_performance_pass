@@ -232,24 +232,6 @@ void MobEntityManager::tick(
     std::uint64_t worldTime,
     ItemType playerMainHand)
 {
-    // TEMPORARY STABILITY MODE:
-    // The mob runtime is intentionally disabled until the dedicated 1.12.2
-    // mob parity stage. Clear restored mobs and skip AI, breeding, despawning,
-    // natural spawning, and all expensive spawn-space/light checks.
-    static_cast<void>(world);
-    static_cast<void>(player);
-    static_cast<void>(worldTime);
-    static_cast<void>(playerMainHand);
-    if (!entities_.empty())
-    {
-        entities_.clear();
-        rebindEntities();
-    }
-    deathEvents_.clear();
-    interactionDrops_.clear();
-    ++ticks_;
-    return;
-
     ++ticks_;
     const std::uint64_t timeOfDay = worldTime % 24000U;
     const bool daytime = timeOfDay < 12000U;

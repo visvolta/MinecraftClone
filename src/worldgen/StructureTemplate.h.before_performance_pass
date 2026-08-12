@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -88,6 +87,5 @@ public:
 private:
     std::filesystem::path root_;
     mutable std::unordered_map<std::string,StructureTemplate> cache_;
-    mutable std::mutex cacheMutex_;
 };
 }

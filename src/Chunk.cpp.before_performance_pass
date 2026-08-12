@@ -161,19 +161,6 @@ bool Chunk::isSectionEmpty(int sectionY) const
            nonAirPerSection[static_cast<std::size_t>(sectionY)] == 0;
 }
 
-bool Chunk::containsBlock(BlockType block) const noexcept
-{
-    for (const auto& section : sections_)
-    {
-        for (const mc::content::BlockState state : section.palette())
-        {
-            if (state.block() == block)
-                return true;
-        }
-    }
-    return false;
-}
-
 int Chunk::getChunkX() const { return chunkX; }
 int Chunk::getChunkZ() const { return chunkZ; }
 int Chunk::getWorldOriginX() const { return chunkX * WIDTH; }

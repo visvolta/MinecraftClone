@@ -228,7 +228,7 @@ private:
     std::condition_variable generationCv_;
     std::condition_variable meshCv_;
 
-    std::vector<std::thread> generationThreads_;
+    std::thread generationThread_;
     std::vector<std::thread> meshThreads_;
     std::atomic<bool> stopping_{false};
 

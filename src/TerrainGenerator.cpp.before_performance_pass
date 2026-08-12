@@ -148,7 +148,7 @@ const Chunk& TerrainGenerator::terrainChunkAt(int chunkX, int chunkZ) const
     terrainCache_.emplace(key, std::move(terrain));
     terrainCacheOrder_.push_back(key);
 
-    constexpr std::size_t maximumCachedTerrainChunks = 96;
+    constexpr std::size_t maximumCachedTerrainChunks = 48;
     while (terrainCacheOrder_.size() > maximumCachedTerrainChunks)
     {
         const std::uint64_t oldest = terrainCacheOrder_.front();

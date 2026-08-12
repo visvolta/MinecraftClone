@@ -328,19 +328,6 @@ void StructureTemplate::place(WorldGenerationContext&c,int ox,int oy,int oz,Rota
 }
 
 StructureTemplateLibrary::StructureTemplateLibrary(std::filesystem::path root):root_(std::move(root)){}
-void StructureTemplateLibrary::setRoot(std::filesystem::path root)
-{
-    std::scoped_lock lock(cacheMutex_);
-    root_=std::move(root);
-    cache_.clear();
-}
-const StructureTemplate& StructureTemplateLibrary::get(const std::string& path) const
-{
-    std::scoped_lock lock(cacheMutex_);
-    if(const auto it=cache_.find(path);it!=cache_.end())
-        return it->second;
-    const auto file=root_/(path+".nbt");
-    auto [inserted,_]=cache_.emplace(path,StructureTemplate::load(file));
-    return inserted->second;
-}
+void StructureTemplateLibrary::setRoot(std::filesystem::path root){root_=std::move(root);cache_.clear();}
+const StructureTemplate&StructureTemplateLibrary::get(const std::string&path)const{auto it=cache_.find(path);if(it!=cache_.end())return it->second;const auto file=root_/(path+".nbt");auto [inserted,_]=cache_.emplace(path,StructureTemplate::load(file));return inserted->second;}
 }

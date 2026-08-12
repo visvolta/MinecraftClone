@@ -37,15 +37,8 @@ World::World(int renderDistance, int seed)
       renderDistance_(std::max(0, renderDistance)),
       unloadDistance_(std::max(0, renderDistance) + 1)
 {
-    const unsigned int hardwareThreads =
-        std::max(1U, std::thread::hardware_concurrency());
-
-    const unsigned int generationWorkerCount =
-        hardwareThreads >= 12U ? 3U : (hardwareThreads >= 6U ? 2U : 1U);
-    generationThreads_.reserve(generationWorkerCount);
-    for (unsigned int worker = 0; worker < generationWorkerCount; ++worker)
-        generationThreads_.emplace_back(&World::generationWorker, this);
-
+    generationThread_ = std::thread(&World::generationWorker, this);
+    const unsigned int hardwareThreads = std::thread::hardware_concurrency();
     const unsigned int meshWorkerCount = hardwareThreads >= 6U ? 2U : 1U;
     meshThreads_.reserve(meshWorkerCount);
     for (unsigned int worker = 0; worker < meshWorkerCount; ++worker)
@@ -105,10 +98,9 @@ World::~World()
     generationCv_.notify_all();
     meshCv_.notify_all();
 
-    for (std::thread& generationThread : generationThreads_)
+    if (generationThread_.joinable())
     {
-        if (generationThread.joinable())
-            generationThread.join();
+        generationThread_.join();
     }
 
     for (std::thread& meshThread : meshThreads_)
@@ -682,11 +674,6 @@ std::optional<StructureLocation> World::findNearestStructure(
 
 void World::initializeGeneratedBlockEntities(const Chunk& chunk)
 {
-    const bool hasSpawner = chunk.containsBlock(BlockType::Spawner);
-    const bool hasChest = chunk.containsBlock(BlockType::Chest);
-    if (!hasSpawner && !hasChest)
-        return;
-
     const auto nextRandom = [](std::uint64_t& state)
     {
         state ^= state >> 12U;
@@ -711,7 +698,7 @@ void World::initializeGeneratedBlockEntities(const Chunk& chunk)
             for (int y = 0; y < Chunk::HEIGHT; ++y)
             {
                 const BlockType generatedBlock = chunk.getBlock(x, y, z);
-                if (hasSpawner && generatedBlock == BlockType::Spawner)
+                if (generatedBlock == BlockType::Spawner)
                 {
                     const BlockPosition position{
                         chunk.getWorldOriginX() + x,
@@ -734,7 +721,7 @@ void World::initializeGeneratedBlockEntities(const Chunk& chunk)
                     }
                     continue;
                 }
-                if (!hasChest || generatedBlock != BlockType::Chest)
+                if (generatedBlock != BlockType::Chest)
                     continue;
                 const BlockPosition position{
                     chunk.getWorldOriginX() + x,
@@ -776,30 +763,27 @@ std::vector<ChunkSnapshot> World::getModifiedChunkSnapshots() const
 {
     std::vector<ChunkSnapshot> result;
     result.reserve(modifiedChunks_.size());
-
-    std::unordered_set<ChunkKey> loadedModified;
-    loadedModified.reserve(modifiedChunks_.size());
-
-    for (const Chunk* chunk : chunkManager_.getChunks())
-    {
-        if (chunk == nullptr)
-            continue;
-        const ChunkKey key = makeKey(chunk->getChunkX(), chunk->getChunkZ());
-        if (!modifiedChunks_.contains(key))
-            continue;
-        result.push_back(chunk->snapshot());
-        loadedModified.insert(key);
-    }
-
     for (const ChunkKey key : modifiedChunks_)
     {
-        if (loadedModified.contains(key))
-            continue;
-        if (const auto saved = persistedChunkSnapshots_.find(key);
-            saved != persistedChunkSnapshots_.end())
-            result.push_back(saved->second);
+        bool foundLoaded = false;
+        for (const Chunk* chunk : chunkManager_.getChunks())
+        {
+            if (chunk != nullptr && makeKey(chunk->getChunkX(), chunk->getChunkZ()) == key)
+            {
+                result.push_back(chunk->snapshot());
+                foundLoaded = true;
+                break;
+            }
+        }
+        if (!foundLoaded)
+        {
+            if (const auto saved = persistedChunkSnapshots_.find(key);
+                saved != persistedChunkSnapshots_.end())
+            {
+                result.push_back(saved->second);
+            }
+        }
     }
-
     return result;
 }
 
@@ -881,17 +865,15 @@ glm::vec3 World::getFluidFlowVector(
 
 int World::getHighestSolidBlockY(int worldX, int worldZ) const
 {
-    const int chunkX = floorDivide(worldX, Chunk::WIDTH);
-    const int chunkZ = floorDivide(worldZ, Chunk::DEPTH);
-    const Chunk* chunk = chunkManager_.getChunk(chunkX, chunkZ);
-    if (chunk == nullptr)
-        return -1;
+    for (int worldY = Chunk::HEIGHT - 1; worldY >= 0; --worldY)
+    {
+        if (isSolidBlock(worldX, worldY, worldZ))
+        {
+            return worldY;
+        }
+    }
 
-    const int height = chunk->getMotionBlockingHeight(
-        positiveModulo(worldX, Chunk::WIDTH),
-        positiveModulo(worldZ, Chunk::DEPTH)
-    );
-    return height > 0 ? height - 1 : -1;
+    return -1;
 }
 
 

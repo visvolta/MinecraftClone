@@ -518,6 +518,11 @@ std::optional<mc::content::BlockState> tryVanilla112State(
     std::string_view registryName,
     std::span<const Property> properties)
 {
+    // Decode genuine 1.12 metadata-backed identities before splitVariantName
+    // rewrites log/log2 and other historic registry names.
+    if (auto legacy = legacyMetadataState(registryName, properties); legacy)
+        return legacy;
+
     const std::string base = resourcePath(registryName);
     std::vector<Property> remaining;
     const std::string mapped = splitVariantName(base, properties, remaining);

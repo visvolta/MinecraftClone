@@ -477,6 +477,22 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
+    add_executable(minecraft_render_item_parity_tests
+        tests/RenderItemParityTests.cpp
+    )
+    target_include_directories(minecraft_render_item_parity_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(minecraft_render_item_parity_tests PRIVATE
+        minecraft_game
+        minecraft_client
+    )
+    add_test(NAME minecraft_render_item_parity_tests
+             COMMAND minecraft_render_item_parity_tests)
+    set_tests_properties(minecraft_render_item_parity_tests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
     add_executable(minecraft_world_generation_tests
         tests/WorldGenerationTests.cpp
     )

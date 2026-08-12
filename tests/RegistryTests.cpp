@@ -104,7 +104,10 @@ int main()
     bootstrap.freezeRegistries();
     const mc::content::ContentCatalog& content = bootstrap.content();
     assert(content.frozen());
-    assert(content.blocks().size() ==
+    // Resource-pack and structure-compatibility blocks may legitimately
+    // extend the registry beyond the legacy BlockType range. Require the
+    // complete legacy set plus the test module rather than an exact total.
+    assert(content.blocks().size() >=
            static_cast<std::size_t>(BlockType::Cobweb) + 2U);
     assert(content.blocks().find(
         ResourceLocation("test:decorative_block")

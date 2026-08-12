@@ -50,14 +50,14 @@ private:
     };
 
     std::unique_ptr<Shader> shader_;
-    std::map<ItemType, GpuMesh> meshes_;
+    std::map<std::uint32_t, GpuMesh> meshes_;
 
     [[nodiscard]] const GpuMesh& meshFor(
-        ItemType item,
+        const ItemStack& stack,
         const ItemAtlas& itemAtlas
     );
     [[nodiscard]] static std::vector<Vertex> buildVertices(
-        ItemType item,
+        const ItemStack& stack,
         const ItemAtlas& itemAtlas
     );
     static void upload(GpuMesh& mesh, const std::vector<Vertex>& vertices);

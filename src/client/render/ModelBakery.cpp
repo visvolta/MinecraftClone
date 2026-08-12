@@ -370,6 +370,16 @@ ModelBakery::ModelBakery(
 {
 }
 
+BakedModel ModelBakery::bakeModel(
+    const core::ResourceLocation& modelName) const
+{
+    BakedModel result;
+    ModelVariant variant;
+    variant.model = modelName;
+    appendVariant(result, variant, resources_);
+    return result;
+}
+
 BakedModel ModelBakery::bake(
     content::BlockState state,
     std::uint64_t positionSeed) const

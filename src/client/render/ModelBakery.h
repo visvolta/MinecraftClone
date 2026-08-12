@@ -56,6 +56,10 @@ public:
         std::uint64_t positionSeed = 0
     ) const;
 
+    [[nodiscard]] BakedModel bakeModel(
+        const core::ResourceLocation& modelName
+    ) const;
+
 private:
     const content::resources::ResourcePack& resources_;
     const content::ContentCatalog& content_;

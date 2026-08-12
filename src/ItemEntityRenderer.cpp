@@ -8,6 +8,10 @@
 #include "Shader.h"
 #include "Texture2D.h"
 #include "TextureAtlas.h"
+#include "BiomeColorMap.h"
+#include "client/render/ModelBakery.h"
+#include "content/ContentCatalog.h"
+#include "content/resources/ResourcePack.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -30,6 +34,124 @@ constexpr std::array<unsigned int, 12> DoubleSidedIndices{
     0, 1, 2, 0, 2, 3,
     2, 1, 0, 3, 2, 0
 };
+
+std::uint32_t itemMeshKey(const ItemStack& stack) noexcept
+{
+    const std::uint32_t item =
+        static_cast<std::uint32_t>(static_cast<std::uint16_t>(stack.item));
+    const std::uint32_t metadata = isBlockItem(stack.item)
+        ? static_cast<std::uint32_t>(stack.damage)
+        : 0U;
+    return item | (metadata << 16U);
+}
+
+glm::vec3 packedColour(std::uint32_t colour) noexcept
+{
+    return {
+        static_cast<float>((colour >> 16U) & 0xFFU) / 255.0f,
+        static_cast<float>((colour >> 8U) & 0xFFU) / 255.0f,
+        static_cast<float>(colour & 0xFFU) / 255.0f
+    };
+}
+
+const BiomeColorMap& itemColourMap()
+{
+    static const BiomeColorMap map(
+        AssetPaths::get("textures/grasscolor.png"),
+        AssetPaths::get("textures/foliage.png")
+    );
+    return map;
+}
+
+glm::vec3 vanillaItemTint(
+    const mc::content::BlockDefinition* definition,
+    int tintIndex)
+{
+    if (definition == nullptr || tintIndex < 0)
+        return glm::vec3(1.0f);
+
+    switch (definition->behaviour.tint)
+    {
+        case mc::content::BlockTint::Grass:
+            return itemColourMap().getGrassColor(
+                0.5f, 1.0f, VanillaBiomes::Plains, 0, 0
+            );
+        case mc::content::BlockTint::Foliage:
+            return packedColour(4764952U);
+        case mc::content::BlockTint::SpruceFoliage:
+            return packedColour(6396257U);
+        case mc::content::BlockTint::BirchFoliage:
+            return packedColour(8431445U);
+        case mc::content::BlockTint::None:
+            return glm::vec3(1.0f);
+    }
+    return glm::vec3(1.0f);
+}
+
+glm::vec3 itemDirectionalShade(BlockFace face, bool shade) noexcept
+{
+    if (!shade) return glm::vec3(1.0f);
+    switch (face)
+    {
+        case BlockFace::Top: return glm::vec3(1.0f);
+        case BlockFace::Bottom: return glm::vec3(0.5f);
+        case BlockFace::Back:
+        case BlockFace::Front: return glm::vec3(0.8f);
+        case BlockFace::Left:
+        case BlockFace::Right: return glm::vec3(0.6f);
+    }
+    return glm::vec3(1.0f);
+}
+
+template <typename VertexType, std::size_t IndexCount>
+void appendQuadWithUvs(
+    std::vector<VertexType>& vertices,
+    const std::array<glm::vec3, 4>& positions,
+    const std::array<glm::vec2, 4>& textureCoordinates,
+    const glm::vec3& colour,
+    const std::array<unsigned int, IndexCount>& indices
+);
+
+template <typename VertexType>
+bool appendBakedModel(
+    std::vector<VertexType>& vertices,
+    const mc::client::BakedModel& model,
+    const mc::content::BlockDefinition* definition)
+{
+    const std::size_t before = vertices.size();
+    for (const mc::client::BakedQuad& quad : model.quads)
+    {
+        const AtlasUV* atlasUv = TextureAtlas::getTextureUV(quad.texture);
+        if (atlasUv == nullptr)
+            continue;
+
+        std::array<glm::vec3, 4> positions = quad.positions;
+        for (glm::vec3& position : positions)
+            position -= glm::vec3(0.5f);
+
+        std::array<glm::vec2, 4> textureCoordinates{};
+        for (std::size_t i = 0; i < textureCoordinates.size(); ++i)
+        {
+            textureCoordinates[i] = {
+                atlasUv->minU +
+                    (atlasUv->maxU - atlasUv->minU) *
+                    (quad.textureCoordinates[i].x / 16.0f),
+                atlasUv->minV +
+                    (atlasUv->maxV - atlasUv->minV) *
+                    (quad.textureCoordinates[i].y / 16.0f)
+            };
+        }
+
+        const glm::vec3 colour =
+            itemDirectionalShade(quad.face, quad.shade) *
+            vanillaItemTint(definition, quad.tintIndex);
+
+        appendQuadWithUvs(
+            vertices, positions, textureCoordinates, colour, FaceIndices
+        );
+    }
+    return vertices.size() != before;
+}
 
 std::array<ItemFace, 6> cubeFaces(const BlockBox& box)
 {
@@ -146,8 +268,9 @@ void ItemEntityRenderer::draw(
     if (entity.getStack().empty())
         return;
 
-    const ItemType item = entity.getStack().item;
-    const GpuMesh& mesh = meshFor(item, itemAtlas);
+    const ItemStack& stack = entity.getStack();
+    const ItemType item = stack.item;
+    const GpuMesh& mesh = meshFor(stack, itemAtlas);
     if (mesh.vertexCount == 0)
         return;
 
@@ -213,20 +336,21 @@ void ItemEntityRenderer::draw(
 }
 
 const ItemEntityRenderer::GpuMesh& ItemEntityRenderer::meshFor(
-    ItemType item,
+    const ItemStack& stack,
     const ItemAtlas& itemAtlas)
 {
-    auto [iterator, inserted] = meshes_.try_emplace(item);
+    auto [iterator, inserted] = meshes_.try_emplace(itemMeshKey(stack));
     if (inserted)
-        upload(iterator->second, buildVertices(item, itemAtlas));
+        upload(iterator->second, buildVertices(stack, itemAtlas));
     return iterator->second;
 }
 
 std::vector<ItemEntityRenderer::Vertex>
 ItemEntityRenderer::buildVertices(
-    ItemType item,
+    const ItemStack& stack,
     const ItemAtlas& itemAtlas)
 {
+    const ItemType item = stack.item;
     std::vector<Vertex> vertices;
     if (!isBlockItem(item))
     {
@@ -329,7 +453,56 @@ ItemEntityRenderer::buildVertices(
     }
 
     const BlockType block = blockFromItem(item);
-    const BlockShapeDefinition& shape = getBlockShape(block);
+    const mc::content::ContentCatalog* catalog =
+        mc::content::ContentCatalog::active();
+    mc::content::BlockState itemState(block, 0);
+
+    if (catalog != nullptr)
+    {
+        itemState = catalog->defaultState(block);
+
+        const mc::content::BlockState metadataState(
+            block, static_cast<std::uint16_t>(stack.damage)
+        );
+        if (catalog->isValidState(metadataState))
+            itemState = metadataState;
+
+        const mc::content::BlockDefinition* definition =
+            catalog->block(itemState);
+
+        if (const mc::core::ResourceLocation* itemName =
+                catalog->itemName(item))
+        {
+            try
+            {
+                const mc::content::resources::ResourcePack resources(
+                    AssetPaths::root()
+                );
+                const mc::client::ModelBakery bakery(resources, *catalog);
+                const mc::core::ResourceLocation modelName(
+                    itemName->nameSpace(),
+                    std::string("item/") + itemName->path()
+                );
+                if (appendBakedModel(
+                        vertices, bakery.bakeModel(modelName), definition))
+                    return vertices;
+            }
+            catch (const std::exception&)
+            {
+                // builtin/entity and deliberately model-less ItemBlocks use
+                // the block-model / legacy fallbacks below.
+            }
+        }
+
+        if (const mc::client::BakedModel* baked =
+                TextureAtlas::getBakedBlockModel(itemState, 0U))
+        {
+            if (appendBakedModel(vertices, *baked, definition))
+                return vertices;
+        }
+    }
+
+    const BlockShapeDefinition& shape = getBlockShape(itemState);
 
     if (shape.renderShape == BlockRenderShape::Boxes)
     {
@@ -341,7 +514,7 @@ ItemEntityRenderer::buildVertices(
                 appendQuad(
                     vertices,
                     face.positions,
-                    TextureAtlas::getBlockUV(block, face.blockFace),
+                    TextureAtlas::getBlockUV(itemState, face.blockFace),
                     face.shade,
                     FaceIndices
                 );
@@ -353,7 +526,7 @@ ItemEntityRenderer::buildVertices(
     if (shape.renderShape == BlockRenderShape::CrossedPlanes)
     {
         constexpr float radius = 0.45f;
-        const AtlasUV uv = TextureAtlas::getBlockUV(block, BlockFace::Front);
+        const AtlasUV uv = TextureAtlas::getBlockUV(itemState, BlockFace::Front);
         appendQuad(
             vertices,
             {{{-radius, -0.5f, -radius}, {radius, -0.5f, radius},
@@ -377,7 +550,7 @@ ItemEntityRenderer::buildVertices(
             vertices,
             {{{-0.5f, -0.5f, 0.0f}, {0.5f, -0.5f, 0.0f},
               {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}}},
-            TextureAtlas::getBlockUV(block, BlockFace::Front),
+            TextureAtlas::getBlockUV(itemState, BlockFace::Front),
             {1.0f, 1.0f, 1.0f},
             DoubleSidedIndices
         );

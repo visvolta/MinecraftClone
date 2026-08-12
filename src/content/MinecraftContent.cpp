@@ -453,8 +453,11 @@ BlockBehaviour resourceBehaviour(std::string_view name)
                 ? BlockTint::BirchFoliage : BlockTint::Foliage);
     }
     if (name == "grass" || name == "grass_block" ||
-        name.find("tallgrass") != std::string_view::npos)
+        name.find("tallgrass") != std::string_view::npos ||
+        name == "double_grass" || name == "double_fern")
         behaviour.tint = BlockTint::Grass;
+    else if (name == "vine")
+        behaviour.tint = BlockTint::Foliage;
 
     if (containsAny(name, {
         "planks", "log", "wood", "fence", "door", "bookshelf",
@@ -500,6 +503,12 @@ void registerStructureCompatibilityBlocks(ContentCatalog& catalog)
             out.push_back({{"facing",f}});
         return out;
     };
+    std::vector<std::vector<std::pair<std::string,std::string>>> bedStates;
+    for(const char* facing:{"north","east","south","west"})
+        for(const char* part:{"foot","head"})
+            bedStates.push_back({{"facing",facing},{"part",part}});
+    addSynthetic("bed",std::move(bedStates));
+
     addSynthetic("wall_sign",horizontal());
     addSynthetic("wall_banner",horizontal());
     addSynthetic("ender_chest",horizontal());

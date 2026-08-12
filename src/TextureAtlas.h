@@ -22,7 +22,7 @@ namespace mc::content::resources { class ResourcePack; }
 
 // Compatibility bridge for the existing mesher/UI. Texture identity now
 // comes from the frozen content registry and UVs come from a runtime-stitched
-// atlas. Stage 4 can replace BlockType+metadata calls with BlockState directly.
+// atlas.
 class TextureAtlas
 {
 public:
@@ -31,6 +31,11 @@ public:
         const mc::content::ContentCatalog& content,
         const mc::content::resources::ResourcePack& resources
     );
+
+    // Rebind the runtime block atlas after entity/UI/overlay renderers have
+    // changed texture unit state. Translucent terrain must never depend on
+    // whatever texture happened to be bound by the previous renderer.
+    static void bind(int textureUnit = 0) noexcept;
 
     [[nodiscard]] static AtlasUV getBlockUV(
         mc::content::BlockState state,
@@ -52,10 +57,12 @@ public:
         BlockType block,
         BlockFace face
     ) noexcept;
+
     [[nodiscard]] static const mc::client::BakedModel* getBakedBlockModel(
         mc::content::BlockState state,
         std::uint64_t positionSeed = 0
     ) noexcept;
+
     [[nodiscard]] static const AtlasUV* getTextureUV(
         const mc::core::ResourceLocation& texture
     ) noexcept;
